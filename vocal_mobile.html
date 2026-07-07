@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Vocal Synthesis — An Explorer of Singing-Voice Synthesis</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Cinzel:wght@400;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+/* === Vocal Synthesis — Styles (medieval manuscript: parchment, ink, gold) === */
+
+:root {
+    --gold: #c8a84e;
+    --gold-bright: #f0d67a;
+    --gold-dark: #8b6914;
+    --accent: #7a1f1f;          /* vermilion rubric */
+    --accent-light: #a83232;
+    --ink: #1c1710;
+    --ink-deep: #100c07;
+    --panel-line: rgba(200, 168, 78, 0.22);
+    --parchment: #efe3c4;
+    --text-main: #e8d9b0;
+    --text-dim: #b8a67e;
+    --bg-dark: #0e0b06;
+    --bg-panel: rgba(24, 19, 11, 0.85);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'EB Garamond', 'Cormorant Garamond', Georgia, serif;
+    background: var(--bg-dark);
+    color: var(--text-main);
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+}
+
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(200, 168, 78, 0.08) 0%, transparent 60%),
+        radial-gradient(ellipse at 50% 100%, rgba(122, 31, 31, 0.06) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Faint ruled-manuscript / four-line stave texture */
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cpath d='M0 20h80M0 34h80M0 48h80M0 62h80' stroke='%23c8a84e' stroke-width='0.3' opacity='0.05'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+}
+
+.icon-border-top {
+    height: 6px;
+    background: linear-gradient(90deg, transparent 0%, var(--gold-dark) 15%, var(--gold-bright) 30%, var(--gold) 50%, var(--gold-bright) 70%, var(--gold-dark) 85%, transparent 100%);
+    position: relative;
+    z-index: 10;
+}
+.icon-border-top::after {
+    content: '';
+    display: block;
+    height: 2px;
+    margin-top: 2px;
+    background: linear-gradient(90deg, transparent 0%, var(--accent) 20%, var(--accent-light) 50%, var(--accent) 80%, transparent 100%);
+}
+
+header {
+    text-align: center;
+    padding: 2.5rem 1rem 1.2rem;
+    position: relative;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1.4rem;
+    flex-wrap: wrap;
+}
+.cross-ornament { font-size: 1.9rem; color: var(--gold); text-shadow: 0 0 15px rgba(200, 168, 78, 0.5); line-height: 1; }
+.cross-ornament.small { font-size: 1.1rem; }
+
+h1 {
+    font-family: 'UnifrakturMaguntia', 'Cinzel', serif;
+    font-size: clamp(2rem, 5vw, 3.4rem);
+    font-weight: 400;
+    color: var(--gold-bright);
+    text-shadow: 0 0 20px rgba(240, 214, 122, 0.3), 0 2px 4px rgba(0, 0, 0, 0.5);
+    letter-spacing: 0.04em;
+}
+.subtitle {
+    font-family: 'Cinzel', serif;
+    font-size: 0.95rem;
+    color: var(--text-dim);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    margin-top: 0.3rem;
+    flex-basis: 100%;
+}
+
+main { max-width: 860px; margin: 0 auto; padding: 0 1.5rem 3rem; position: relative; z-index: 5; }
+
+/* Illuminated-initial frame (inline SVG lives inside) */
+.icon-frame {
+    width: 230px;
+    margin: 0 auto 1.6rem;
+    padding: 12px;
+    background: linear-gradient(145deg, #2a2214, #171008);
+    border: 4px solid var(--gold-dark);
+    border-radius: 8px;
+    box-shadow: 0 0 30px rgba(200, 168, 78, 0.15), inset 0 0 20px rgba(200, 168, 78, 0.05), 0 8px 32px rgba(0, 0, 0, 0.5);
+    position: relative;
+    cursor: pointer;
+    transition: box-shadow 0.5s ease, transform 0.3s ease;
+    overflow: hidden;
+}
+.icon-frame:hover { box-shadow: 0 0 50px rgba(200, 168, 78, 0.25), inset 0 0 30px rgba(200, 168, 78, 0.08), 0 8px 32px rgba(0, 0, 0, 0.5); transform: scale(1.02); }
+.icon-frame.active { box-shadow: 0 0 60px rgba(240, 214, 122, 0.35), inset 0 0 30px rgba(200, 168, 78, 0.1), 0 8px 32px rgba(0, 0, 0, 0.5); border-color: var(--gold-bright); }
+.icon-frame::before { content: ''; position: absolute; inset: 5px; border: 1px solid var(--gold-dark); border-radius: 4px; opacity: 0.5; pointer-events: none; z-index: 2; }
+.icon-frame svg { width: 100%; height: auto; display: block; position: relative; z-index: 1; }
+
+.controls-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 1.6rem;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+}
+
+.ornament-line { display: flex; align-items: center; gap: 0.5rem; margin: 1.1rem 0; }
+.ornament-dot { width: 6px; height: 6px; background: var(--gold); border-radius: 50%; flex-shrink: 0; }
+.ornament-rule { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--gold-dark), transparent); }
+.ornament-cross { color: var(--gold); font-size: 1rem; flex-shrink: 0; opacity: 0.7; }
+
+.transport { display: flex; justify-content: center; margin: 1.4rem 0 0.7rem; }
+.btn-chant {
+    font-family: 'Cinzel', serif;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--parchment);
+    background: linear-gradient(145deg, var(--accent), #5a1414);
+    border: 2px solid var(--gold-dark);
+    border-radius: 50px;
+    padding: 1rem 2.8rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    box-shadow: 0 4px 15px rgba(122, 31, 31, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    letter-spacing: 0.05em;
+}
+.btn-chant:hover { background: linear-gradient(145deg, var(--accent-light), var(--accent)); border-color: var(--gold); box-shadow: 0 4px 20px rgba(122, 31, 31, 0.6), 0 0 20px rgba(200, 168, 78, 0.2); transform: translateY(-1px); }
+.btn-chant:active { transform: translateY(1px); }
+.btn-chant.playing { background: linear-gradient(145deg, #35502a, #223618); border-color: var(--gold-bright); animation: glowPulse 3s ease-in-out infinite; }
+@keyframes glowPulse {
+    0%, 100% { box-shadow: 0 4px 20px rgba(53, 80, 42, 0.4), 0 0 20px rgba(240, 214, 122, 0.1); }
+    50% { box-shadow: 0 4px 25px rgba(53, 80, 42, 0.6), 0 0 35px rgba(240, 214, 122, 0.25); }
+}
+.btn-icon { font-size: 1.3rem; }
+
+.ab-hint { text-align: center; font-size: 0.92rem; color: var(--text-dim); font-style: italic; margin: 0.2rem 0 1.2rem; }
+.ab-hint strong { color: var(--gold-bright); font-style: normal; }
+
+.control-label { display: block; font-family: 'Cinzel', serif; font-size: 0.82rem; color: var(--text-dim); letter-spacing: 0.1em; margin-bottom: 0.55rem; text-transform: uppercase; }
+.control-group { margin-bottom: 1.1rem; }
+
+/* Technique picker — a wrapped grid of rich buttons */
+.tech-selector { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+@media (max-width: 720px) { .tech-selector { grid-template-columns: repeat(2, 1fr); } }
+.tech-btn {
+    font-family: 'Cinzel', serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    background: rgba(40, 32, 18, 0.6);
+    border: 1px solid var(--panel-line);
+    border-radius: 8px;
+    padding: 0.6rem 0.6rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-height: 66px;
+}
+.tech-btn small { font-family: 'EB Garamond', serif; font-size: 0.68rem; font-weight: 400; letter-spacing: 0; line-height: 1.25; color: var(--text-dim); opacity: 0.7; display: none; }
+.tech-btn:hover { background: rgba(200, 168, 78, 0.1); border-color: var(--gold-dark); color: var(--gold-bright); }
+.tech-btn.active { color: var(--gold-bright); background: rgba(200, 168, 78, 0.16); border-color: var(--gold); box-shadow: 0 0 12px rgba(200, 168, 78, 0.18); }
+.tech-btn.active small { display: block; opacity: 0.9; }
+
+.mode-selector { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.mode-btn, .vowel-btn, .pitch-btn {
+    font-family: 'Cinzel', serif;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    background: rgba(40, 32, 18, 0.6);
+    border: 1px solid var(--panel-line);
+    border-radius: 6px;
+    padding: 0.5rem 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 46px;
+    text-align: center;
+}
+.mode-btn:hover, .vowel-btn:hover, .pitch-btn:hover { background: rgba(200, 168, 78, 0.1); border-color: var(--gold-dark); }
+.mode-btn.active, .vowel-btn.active, .pitch-btn.active { color: var(--gold-bright); background: rgba(200, 168, 78, 0.15); border-color: var(--gold); box-shadow: 0 0 10px rgba(200, 168, 78, 0.15); }
+.vowel-btn small { display: block; font-size: 0.6rem; letter-spacing: 0.02em; opacity: 0.7; margin-top: 2px; text-transform: none; }
+.vowel-selector .vowel-btn { flex: 1; }
+
+.sliders-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 2rem; }
+.sliders-grid.two { grid-template-columns: 3fr 2fr; }
+@media (max-width: 600px) { .sliders-grid, .sliders-grid.two { grid-template-columns: 1fr; } }
+
+.visualization-frame { background: var(--bg-panel); border: 1px solid var(--panel-line); border-radius: 12px; padding: 1rem; overflow: hidden; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3); margin-bottom: 1.6rem; }
+#vizCanvas { width: 100%; height: 160px; display: block; border-radius: 6px; }
+
+/* Selected-technique dossier panel */
+.about-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 12px;
+    padding: 1.8rem 2rem;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+    line-height: 1.65;
+}
+.about-panel h2 { font-family: 'Cinzel', serif; font-size: 1.05rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-bright); margin-bottom: 0.4rem; }
+.about-panel .era { font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent-light); margin-bottom: 0.15rem; }
+.about-panel .who { font-family: 'EB Garamond', serif; font-style: italic; font-size: 0.92rem; color: var(--gold-dark); margin-bottom: 1rem; }
+.about-panel p { color: var(--text-dim); font-size: 1.02rem; margin-bottom: 0.9rem; }
+.about-panel p:last-child { margin-bottom: 0; }
+.lineage { margin-top: 1.2rem; padding-top: 1.1rem; border-top: 1px solid var(--panel-line); }
+.lineage h3 { font-family: 'Cinzel', serif; font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 0.7rem; }
+.lineage-chain { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.04em; }
+.lineage-chain a { color: var(--text-dim); text-decoration: none; padding: 0.3rem 0.6rem; border: 1px solid var(--panel-line); border-radius: 5px; transition: all 0.2s ease; white-space: nowrap; }
+.lineage-chain a:hover { color: var(--gold-bright); border-color: var(--gold); }
+
+footer { text-align: center; padding: 2rem 1rem 3rem; position: relative; z-index: 5; }
+footer p { font-family: 'Cinzel', serif; font-size: 0.85rem; color: var(--text-dim); letter-spacing: 0.15em; margin-top: 0.5rem; }
+footer .latin { font-family: 'EB Garamond', serif; font-style: italic; font-size: 0.85rem; color: var(--gold-dark); margin-top: 0.3rem; }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-dark); }
+::-webkit-scrollbar-thumb { background: var(--gold-dark); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold); }
+::selection { background: rgba(200, 168, 78, 0.3); color: var(--parchment); }
+
+
+/* mobile safe areas */
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.mode-btn, .choir-btn, .btn-chant { min-height: 44px; }
+.icon-frame { width: 180px; }
+main { padding-left: 1rem; padding-right: 1rem; }
+</style>
+</head>
+<body>
+    <div class="icon-border-top"></div>
+
+    <header>
+        <div class="cross-ornament">&#x2626;</div>
+        <h1>Vocal Synthesis</h1>
+        <p class="subtitle">The Machine Made to Sing &#8226; Earliest to Modern</p>
+        <div class="cross-ornament">&#x2626;</div>
+    </header>
+
+    <main>
+        <!-- Illuminated initial: a larynx / waveform "V" -->
+        <div class="icon-frame" id="mainIcon">
+            <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Illuminated initial V — a singing larynx">
+                <defs>
+                    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0" stop-color="#f0d67a"/><stop offset="0.5" stop-color="#c8a84e"/><stop offset="1" stop-color="#8b6914"/>
+                    </linearGradient>
+                    <radialGradient id="halo" cx="0.5" cy="0.4" r="0.7">
+                        <stop offset="0" stop-color="#3a5a7a"/><stop offset="1" stop-color="#16233a"/>
+                    </radialGradient>
+                </defs>
+                <rect x="8" y="8" width="184" height="184" rx="6" fill="url(#halo)" stroke="#8b6914" stroke-width="2"/>
+                <rect x="16" y="16" width="168" height="168" rx="4" fill="none" stroke="#7a1f1f" stroke-width="1.5" opacity="0.7"/>
+                <!-- vine flourishes -->
+                <path d="M28 30 q20 -14 44 -4 M172 30 q-20 -14 -44 -4 M28 170 q20 14 44 4 M172 170 q-20 14 -44 4" fill="none" stroke="#c8a84e" stroke-width="1.4" opacity="0.55"/>
+                <circle cx="30" cy="30" r="3.5" fill="#a83232"/><circle cx="170" cy="30" r="3.5" fill="#a83232"/>
+                <circle cx="30" cy="170" r="3.5" fill="#a83232"/><circle cx="170" cy="170" r="3.5" fill="#a83232"/>
+                <!-- initial V -->
+                <text x="100" y="140" text-anchor="middle" font-family="UnifrakturMaguntia, serif" font-size="150" fill="url(#gold)" stroke="#5a4408" stroke-width="1.2">V</text>
+                <!-- a sound-wave / vocal-fold ripple crossing the initial -->
+                <g opacity="0.85" stroke="#e8d9b0" stroke-width="1.6" fill="none">
+                    <path d="M40 96 q10 -22 20 0 t20 0 t20 0 t20 0 t20 0 t20 0"/>
+                </g>
+                <path d="M40 96 q10 -22 20 0 t20 0 t20 0 t20 0 t20 0 t20 0" fill="none" stroke="#7a1f1f" stroke-width="1" opacity="0.6" transform="translate(0,4)"/>
+            </svg>
+        </div>
+
+        <div class="controls-panel">
+            <div class="ornament-line"><span class="ornament-dot"></span><span class="ornament-rule"></span><span class="ornament-cross">&#x2626;</span><span class="ornament-rule"></span><span class="ornament-dot"></span></div>
+
+            <div class="transport">
+                <button class="btn-chant" id="btnChant" onclick="toggleChant()">
+                    <span class="btn-icon">&#x266A;</span>
+                    <span class="btn-text">Give Voice</span>
+                </button>
+            </div>
+
+            <p class="ab-hint">While it sounds, switch <strong>Technique</strong> to A/B the very same pitch &amp; vowel across three centuries of method.</p>
+
+            <!-- Technique picker (generated from VocalVoices.TECHNIQUES) -->
+            <div class="control-group">
+                <label class="control-label">&#x2726; Technique &mdash; earliest &rarr; modern</label>
+                <div class="tech-selector" id="techButtons"></div>
+            </div>
+
+            <!-- Vowel -->
+            <div class="control-group">
+                <label class="control-label">&#x2726; Vowel</label>
+                <div class="mode-selector vowel-selector">
+                    <button class="vowel-btn active" data-vowel="a" onclick="selectVowel('a')">A<small>father</small></button>
+                    <button class="vowel-btn" data-vowel="e" onclick="selectVowel('e')">E<small>bet</small></button>
+                    <button class="vowel-btn" data-vowel="i" onclick="selectVowel('i')">I<small>see</small></button>
+                    <button class="vowel-btn" data-vowel="o" onclick="selectVowel('o')">O<small>go</small></button>
+                    <button class="vowel-btn" data-vowel="u" onclick="selectVowel('u')">U<small>boot</small></button>
+                </div>
+            </div>
+
+            <div class="sliders-grid two">
+                <!-- Pitch -->
+                <div class="control-group">
+                    <label class="control-label">&#x2726; Pitch</label>
+                    <div class="mode-selector pitch-selector">
+                        <button class="pitch-btn" data-hz="130.81" onclick="selectPitch(130.81,this)">C3</button>
+                        <button class="pitch-btn" data-hz="164.81" onclick="selectPitch(164.81,this)">E3</button>
+                        <button class="pitch-btn active" data-hz="196.00" onclick="selectPitch(196.00,this)">G3</button>
+                        <button class="pitch-btn" data-hz="261.63" onclick="selectPitch(261.63,this)">C4</button>
+                        <button class="pitch-btn" data-hz="329.63" onclick="selectPitch(329.63,this)">E4</button>
+                    </div>
+                </div>
+                <!-- Sustain vs phrase -->
+                <div class="control-group">
+                    <label class="control-label">&#x2726; Transport</label>
+                    <div class="mode-selector transport-mode">
+                        <button class="mode-btn active" data-mode="sustain" onclick="selectMode('sustain')">Sustain</button>
+                        <button class="mode-btn" data-mode="phrase" onclick="selectMode('phrase')">Phrase</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="ornament-line"><span class="ornament-dot"></span><span class="ornament-rule"></span><span class="ornament-cross">&#x2626;</span><span class="ornament-rule"></span><span class="ornament-dot"></span></div>
+        </div>
+
+        <div class="visualization-frame">
+            <canvas id="vizCanvas" width="800" height="200"></canvas>
+        </div>
+
+        <!-- Selected-technique dossier -->
+        <div class="about-panel">
+            <h2 id="infoTitle">FOF / CHANT</h2>
+            <div class="era" id="infoEra">1979–1984 · IRCAM</div>
+            <div class="who" id="infoWho">Rodet, Potard &amp; Barrière</div>
+            <p id="infoBody"></p>
+            <div class="lineage">
+                <h3>The full story</h3>
+                <p>This explorer implements eight techniques live; the complete timeline &mdash; from the mechanical talking machines of <em>Kratzenstein</em> (1779) and <em>von Kempelen</em> (1791), through the vocoder, formant synths, the first singing computer, LPC, FOF, PSOLA, VOCALOID and the neural era (WaveNet, DDSP, DiffSinger) &mdash; is written up in the history.</p>
+                <div class="lineage-chain">
+                    <a href="HISTORY.md">Read the history &rarr;</a>
+                    <a href="https://brendanjameslynskey.github.io/Synth_Organum/">Synth&nbsp;Organum (uses these engines)</a>
+                    <a href="https://github.com/BrendanJamesLynskey/DSP_and_Music">DSP &amp; Music collection</a>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="cross-ornament small">&#x2626;</div>
+        <p>Vox humana ex machina</p>
+        <p class="latin">the human voice, out of the machine</p>
+    </footer>
+
+    <script>
+/**
+ * vocal-voices.js — a small library of interchangeable VOCAL SYNTHESIS engines
+ * for the Web Audio API, sharing one interface. No samples, no dependencies.
+ *
+ * Techniques (each a genuinely different way of making a sung voice):
+ *
+ *   'fof'      FOF — Fonction d'Onde Formantique (IRCAM CHANT). The voice is a
+ *              stream of overlapping formant grains, one burst per glottal pulse.
+ *              Runs in an AudioWorklet. The most convincingly "sung" of the four.
+ *
+ *   'formant'  Source–filter. A glottal-pulse oscillator run through a bank of
+ *              parallel resonant band-pass formant filters. Native Web Audio nodes.
+ *
+ *   'additive' Additive / spectral. A sum of harmonics whose amplitudes trace the
+ *              vowel's formant envelope, rebuilt per note as a PeriodicWave so the
+ *              formants stay fixed while the pitch moves.
+ *
+ *   'tract'    Physical model. A Kelly–Lochbaum digital waveguide of the vocal
+ *              tract — a ladder of cylindrical sections whose area function makes
+ *              the vowel — excited by a glottal pulse. Runs in an AudioWorklet.
+ *
+ * Usage:
+ *   await VocalVoices.init(ctx);                       // load the worklets once
+ *   const v = VocalVoices.create(ctx, { technique:'fof', vowel:'a', detuneCents:0 });
+ *   v.output.connect(dest);
+ *   v.setFrequency(220, ctx.currentTime, 0.1);         // pitch (with optional glide)
+ *   v.setLevel(1, ctx.currentTime);                    // gate the voice on
+ *   v.setVowel('o', ctx.currentTime);                  // morph the vowel
+ *   v.dispose();
+ */
+(function (global) {
+    'use strict';
+
+    // ── Sung-vowel formant tables: five formants {f: Hz, a: amp, bw: Hz} ─────────
+    const VOWELS = {
+        a: [{f:650,a:1,bw:80},{f:1080,a:0.5,bw:90},{f:2650,a:0.28,bw:120},{f:2900,a:0.2,bw:130},{f:3250,a:0.1,bw:140}],
+        e: [{f:400,a:1,bw:70},{f:1700,a:0.45,bw:100},{f:2500,a:0.32,bw:120},{f:2900,a:0.22,bw:130},{f:3300,a:0.12,bw:140}],
+        i: [{f:290,a:1,bw:60},{f:2100,a:0.4,bw:110},{f:2800,a:0.34,bw:120},{f:3300,a:0.24,bw:130},{f:3600,a:0.12,bw:150}],
+        o: [{f:400,a:1,bw:70},{f:760,a:0.34,bw:80},{f:2550,a:0.2,bw:120},{f:2850,a:0.15,bw:130},{f:3250,a:0.08,bw:140}],
+        u: [{f:350,a:1,bw:65},{f:600,a:0.26,bw:75},{f:2400,a:0.16,bw:120},{f:2800,a:0.1,bw:130},{f:3200,a:0.06,bw:140}]
+    };
+
+    // Vocal-tract constriction presets (tongue index/diameter, lip aperture) for
+    // the Kelly–Lochbaum model. index is fraction glottis→lips.
+    const TRACT_VOWELS = {
+        a: { tongueIndex: 0.35, tongueDiameter: 2.6, lip: 1.5 },
+        e: { tongueIndex: 0.56, tongueDiameter: 1.7, lip: 1.4 },
+        i: { tongueIndex: 0.74, tongueDiameter: 1.05, lip: 1.4 },
+        o: { tongueIndex: 0.40, tongueDiameter: 1.9, lip: 0.8 },
+        u: { tongueIndex: 0.50, tongueDiameter: 1.4, lip: 0.7 }
+    };
+
+    // ── Worklet source: FOF grain voice ─────────────────────────────────────────
+    const FOF_SRC = `
+    class FofVoiceProcessor extends AudioWorkletProcessor {
+      static get parameterDescriptors(){return [
+        {name:'frequency',defaultValue:130,minValue:20,maxValue:3000,automationRate:'a-rate'},
+        {name:'level',defaultValue:0,minValue:0,maxValue:2,automationRate:'a-rate'}];}
+      constructor(o){super();o=(o&&o.processorOptions)||{};this.sr=sampleRate;this.phase=0;this.grains=[];
+        this.formants=o.formants||[{f:600,a:1,bw:90}];this.tex=o.tex||0.004;
+        this.breath=o.breath!=null?o.breath:0.06;this.jitter=o.jitter!=null?o.jitter:0.03;
+        this.vibRate=4.2+Math.random()*1.6;this.vibDepth=o.vibDepth!=null?o.vibDepth:0.006;this.vibPhase=Math.random()*6.283;
+        this.prune=Math.floor(0.065*this.sr);this.maxG=28;
+        this.port.onmessage=(e)=>{if(e.data.formants)this.formants=e.data.formants;if(e.data.breath!=null)this.breath=e.data.breath;};}
+      process(inp,outp,p){const out=outp[0][0];if(!out)return true;const fA=p.frequency,lA=p.level,n=out.length,T=6.283185307;
+        for(let i=0;i<n;i++){const lvl=lA.length>1?lA[i]:lA[0];let f0=fA.length>1?fA[i]:fA[0];
+          this.vibPhase+=T*this.vibRate/this.sr;if(this.vibPhase>T)this.vibPhase-=T;f0*=1+Math.sin(this.vibPhase)*this.vibDepth;
+          this.phase+=f0/this.sr;
+          if(this.phase>=1){this.phase-=1;if(lvl>0.0002||this.grains.length){this.grains.push({age:0,amp:1+(Math.random()-0.5)*this.jitter});
+            while(this.grains.length&&this.grains[0].age>this.prune)this.grains.shift();if(this.grains.length>this.maxG)this.grains.shift();}}
+          let s=0;const F=this.formants,tex=this.tex;
+          for(let g=0;g<this.grains.length;g++){const gr=this.grains[g],t=gr.age/this.sr;let atk=1;if(t<tex)atk=0.5*(1-Math.cos(Math.PI*t/tex));
+            for(let k=0;k<F.length;k++){const fm=F[k],env=atk*Math.exp(-Math.PI*fm.bw*t);if(env>1e-4)s+=gr.amp*fm.a*env*Math.sin(T*fm.f*t);}gr.age++;}
+          if(this.breath>0)s+=(Math.random()*2-1)*this.breath*(0.4+0.6*Math.min(1,this.grains.length/3));
+          out[i]=s*lvl*0.22;}
+        return true;}}
+    registerProcessor('fof-voice',FofVoiceProcessor);`;
+
+    // ── Worklet source: Kelly–Lochbaum vocal-tract voice ────────────────────────
+    const TRACT_SRC = `
+    class TractVoiceProcessor extends AudioWorkletProcessor {
+      static get parameterDescriptors(){return [
+        {name:'frequency',defaultValue:130,minValue:20,maxValue:3000,automationRate:'a-rate'},
+        {name:'level',defaultValue:0,minValue:0,maxValue:2,automationRate:'a-rate'}];}
+      constructor(o){super();o=(o&&o.processorOptions)||{};this.sr=sampleRate;this.N=28;
+        this.L=new Float64Array(this.N);this.R=new Float64Array(this.N);
+        this.jL=new Float64Array(this.N+1);this.jR=new Float64Array(this.N+1);
+        this.k=new Float64Array(this.N+1);this.diam=new Float64Array(this.N);
+        this.glottalRefl=0.75;this.lipRefl=-0.85;this.phase=0;this.hp=0;this.hpPrev=0;
+        this.vibRate=4.4+Math.random()*1.2;this.vibPhase=Math.random()*6.283;this.vibDepth=o.vibDepth!=null?o.vibDepth:0.006;
+        this.breath=o.breath!=null?o.breath:0.02;this.tense=0.85;
+        this.setShape(o.shape||{tongueIndex:0.4,tongueDiameter:2.2,lip:1.3});
+        this.port.onmessage=(e)=>{if(e.data.shape)this.setShape(e.data.shape);if(e.data.breath!=null)this.breath=e.data.breath;};}
+      setShape(s){const N=this.N;
+        for(let i=0;i<N;i++){const x=i/(N-1);
+          let d=1.5;                                   // rest profile
+          if(x<0.18)d=0.7+x/0.18*0.8;                  // glottal end narrows
+          const ti=s.tongueIndex,tw=0.22;              // tongue constriction (Gaussian dip)
+          d-= (s.tongueDiameter>0? (1.9-s.tongueDiameter):0)*Math.exp(-Math.pow((x-ti)/tw,2));
+          if(x>0.86)d=Math.min(d,s.lip);               // lip aperture
+          this.diam[i]=Math.max(0.05,d);}
+        // reflection coefficients from areas (A ~ diam^2)
+        for(let i=1;i<N;i++){const a1=this.diam[i-1]*this.diam[i-1],a2=this.diam[i]*this.diam[i];
+          this.k[i]=(a1-a2)/(a1+a2+1e-6);}
+        this.k[0]=this.glottalRefl;this.k[N]=this.lipRefl;}
+      glottal(ph,tense){ // Rosenberg-like pulse, tenseness shapes it
+        const tp=0.6,tn=0.16;
+        if(ph<tp)return tense*(3*(ph/tp)*(ph/tp)-2*(ph/tp)*(ph/tp)*(ph/tp));
+        if(ph<tp+tn){const u=(ph-tp)/tn;return tense*(1-u*u);}
+        return 0;}
+      step(gl){const N=this.N,R=this.R,L=this.L,jR=this.jR,jL=this.jL,k=this.k;
+        jR[0]=L[0]*this.glottalRefl+gl;
+        for(let i=1;i<N;i++){const w=k[i]*(R[i-1]+L[i]);jR[i]=R[i-1]-w;jL[i-1]=L[i]+w;}
+        jL[N-1]=R[N-1]*this.lipRefl;
+        for(let i=0;i<N;i++){R[i]=jR[i]*0.9995;L[i]=jL[i]*0.9995;}
+        return R[N-1];}
+      process(inp,outp,p){const out=outp[0][0];if(!out)return true;const fA=p.frequency,lA=p.level,n=out.length,T=6.283185307;
+        for(let i=0;i<n;i++){const lvl=lA.length>1?lA[i]:lA[0];let f0=fA.length>1?fA[i]:fA[0];
+          this.vibPhase+=T*this.vibRate/this.sr;if(this.vibPhase>T)this.vibPhase-=T;f0*=1+Math.sin(this.vibPhase)*this.vibDepth;
+          this.phase+=f0/this.sr;if(this.phase>=1)this.phase-=1;
+          let g=this.glottal(this.phase,this.tense);if(this.breath>0)g+=(Math.random()*2-1)*this.breath;
+          g*=lvl;
+          let o1=this.step(g);o1=this.step(g);        // 2x oversample for bandwidth/stability
+          // radiation highpass (lip differentiation)
+          const hp=o1-this.hpPrev+0.995*this.hp;this.hp=hp;this.hpPrev=o1;
+          out[i]=hp*lvl*0.6;}
+        return true;}}
+    registerProcessor('tract-voice',TractVoiceProcessor);`;
+
+    // Worklet readiness is tracked PER AudioContext (a context can only use
+    // worklets whose modules were added to it), so the library is safe even if
+    // an app builds more than one context.
+    async function init(ctx) {
+        if (ctx.__vocalWorklets) return true;
+        try {
+            for (const src of [FOF_SRC, TRACT_SRC]) {
+                const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+                await ctx.audioWorklet.addModule(url);
+            }
+            ctx.__vocalWorklets = true;
+        } catch (e) {
+            ctx.__vocalWorklets = false;
+        }
+        return !!ctx.__vocalWorklets;
+    }
+
+    function hasWorklets(ctx) { return !!(ctx && ctx.__vocalWorklets); }
+
+    // Build a PeriodicWave whose harmonic amplitudes trace the formant envelope
+    // at a given fundamental (used by the 'additive' technique).
+    function formantWave(ctx, f0, formants) {
+        const nyq = ctx.sampleRate / 2;
+        const K = Math.max(4, Math.min(64, Math.floor(nyq / f0)));
+        const real = new Float32Array(K + 1), imag = new Float32Array(K + 1);
+        for (let k = 1; k <= K; k++) {
+            const fh = k * f0;
+            let amp = 0;
+            for (const fm of formants) {
+                const d = (fh - fm.f) / (fm.bw * 0.5);
+                amp += fm.a / (1 + d * d);                 // Lorentzian formant peak
+            }
+            amp *= Math.pow(k, -0.35);                      // gentle source tilt
+            imag[k] = amp;
+        }
+        return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+    }
+
+    function glottalWave(ctx) {
+        const n = 40, real = new Float32Array(n), imag = new Float32Array(n);
+        for (let k = 1; k < n; k++) imag[k] = 1 / Math.pow(k, 1.2);
+        return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+    }
+
+    // Bright, near-flat-spectrum impulse-train wave — the classic buzzy LPC /
+    // Speak-&-Spell excitation (many harmonics of nearly equal weight).
+    function impulseWave(ctx) {
+        const n = 32, real = new Float32Array(n), imag = new Float32Array(n);
+        for (let k = 1; k < n; k++) imag[k] = 1 / Math.sqrt(k);   // ~ -3 dB/oct, still buzzy
+        return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+    }
+
+    // A looping white-noise BufferSource (2 s), used as the hiss/aspiration/
+    // stochastic excitation in the vocoder, ddsp, klatt and lpc techniques.
+    function makeNoise(ctx) {
+        const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 2), ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource();
+        src.buffer = buf; src.loop = true;
+        return src;
+    }
+
+    // Sample a vowel's formant envelope (sum of Lorentzian peaks) at one frequency —
+    // this sets each vocoder band gain and each ddsp/klatt resonator amplitude.
+    function formantEnvAt(freq, formants) {
+        let amp = 0;
+        for (const fm of formants) {
+            const d = (freq - fm.f) / (fm.bw * 0.65);
+            amp += fm.a / (1 + d * d);
+        }
+        return amp;
+    }
+
+    // ── The voice factory ───────────────────────────────────────────────────────
+    function create(ctx, opts) {
+        opts = opts || {};
+        const technique = opts.technique || 'fof';
+        const vowelName = opts.vowel || 'a';
+        const detuneCents = opts.detuneCents || 0;
+        const detuneFactor = Math.pow(2, detuneCents / 1200);
+        const breath = opts.breath != null ? opts.breath : 0.06;
+        const vibDepth = opts.vibDepth != null ? opts.vibDepth : 0.006;
+
+        if ((technique === 'fof' || technique === 'tract') && ctx.__vocalWorklets) {
+            const name = technique === 'fof' ? 'fof-voice' : 'tract-voice';
+            const processorOptions = technique === 'fof'
+                ? { formants: VOWELS[vowelName], breath, vibDepth, jitter: 0.03 }
+                : { shape: TRACT_VOWELS[vowelName], breath: breath * 0.4, vibDepth };
+            const node = new AudioWorkletNode(ctx, name, { numberOfInputs: 0, outputChannelCount: [1], processorOptions });
+            const freqParam = node.parameters.get('frequency');
+            const levelParam = node.parameters.get('level');
+            return {
+                technique, output: node,
+                setFrequency(f, t, glide) {
+                    const target = f * detuneFactor;
+                    freqParam.cancelScheduledValues(t);
+                    if (glide && glide > 0) { freqParam.setValueAtTime(freqParam.value || target, t); freqParam.exponentialRampToValueAtTime(Math.max(1, target), t + glide); }
+                    else freqParam.setValueAtTime(target, t);
+                },
+                setLevel(v, t) { levelParam.cancelScheduledValues(t); levelParam.setValueAtTime(v, t); },
+                setVowel(name2, t) {
+                    if (technique === 'fof') node.port.postMessage({ formants: VOWELS[name2] });
+                    else node.port.postMessage({ shape: TRACT_VOWELS[name2] });
+                },
+                dispose() { try { node.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ── Channel vocoder / VODER (Dudley, Bell Labs 1939) ────────────────────
+        // Buzz (pulse train at f0) + hiss (noise) split through a bank of band-pass
+        // filters whose gains are the vowel's formant envelope at each band centre.
+        if (technique === 'vocoder') {
+            const out = ctx.createGain(); out.gain.value = 0;      // out gain = the voice gate
+            let formants = VOWELS[vowelName];
+            const buzz = ctx.createOscillator(); buzz.setPeriodicWave(glottalWave(ctx)); buzz.detune.value = detuneCents;
+            const buzzGain = ctx.createGain(); buzzGain.gain.value = 1; buzz.connect(buzzGain);
+            const hiss = makeNoise(ctx);
+            const hissGain = ctx.createGain(); hissGain.gain.value = 0.05 + breath * 0.6; hiss.connect(hissGain);
+            const NB = 14, fmin = 180, fmax = 4200;
+            const bands = [];
+            for (let i = 0; i < NB; i++) {
+                const cf = fmin * Math.pow(fmax / fmin, i / (NB - 1));
+                const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = cf; bp.Q.value = 5.5;
+                const g = ctx.createGain(); g.gain.value = formantEnvAt(cf, formants);
+                buzzGain.connect(bp); hissGain.connect(bp); bp.connect(g); g.connect(out);
+                bands.push({ cf, g });
+            }
+            buzz.start(ctx.currentTime); hiss.start(ctx.currentTime);
+            return {
+                technique, output: out,
+                setFrequency(f, t, glide) {
+                    const target = f * detuneFactor;
+                    if (glide && glide > 0) { buzz.frequency.setValueAtTime(buzz.frequency.value || target, t); buzz.frequency.exponentialRampToValueAtTime(Math.max(1, target), t + glide); }
+                    else buzz.frequency.setValueAtTime(target, t);
+                },
+                setLevel(v, t) { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(v, t); },
+                setVowel(name2, t) { formants = VOWELS[name2]; bands.forEach((b) => b.g.gain.setValueAtTime(formantEnvAt(b.cf, formants), t)); },
+                dispose() { try { buzz.stop(); } catch (e) {} try { hiss.stop(); } catch (e) {} try { out.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ── DDSP-style harmonic + filtered noise (Engel et al. 2020) ────────────
+        // A formant-weighted harmonic oscillator summed with time-varying
+        // formant-shaped filtered noise — the classic-meets-neural bridge.
+        if (technique === 'ddsp') {
+            const out = ctx.createGain(); out.gain.value = 0;
+            let formants = VOWELS[vowelName];
+            let lastF0 = 200;
+            const osc = ctx.createOscillator(); osc.setPeriodicWave(formantWave(ctx, lastF0, formants)); osc.detune.value = detuneCents;
+            const harm = ctx.createGain(); harm.gain.value = 0.92; osc.connect(harm); harm.connect(out);
+            const noise = makeNoise(ctx);
+            const nGain = ctx.createGain(); nGain.gain.value = 0.10 + breath * 0.5;
+            const nb = [0, 2, 3].map((idx) => {
+                const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+                bp.frequency.value = formants[idx].f; bp.Q.value = Math.max(0.6, formants[idx].f / (formants[idx].bw * 2));
+                noise.connect(bp); bp.connect(nGain); return { bp, idx };
+            });
+            nGain.connect(out);
+            osc.start(ctx.currentTime); noise.start(ctx.currentTime);
+            return {
+                technique, output: out,
+                setFrequency(f, t, glide) {
+                    const target = f * detuneFactor;
+                    if (glide && glide > 0) { osc.frequency.setValueAtTime(osc.frequency.value || target, t); osc.frequency.exponentialRampToValueAtTime(Math.max(1, target), t + glide); }
+                    else osc.frequency.setValueAtTime(target, t);
+                    if (Math.abs(f - lastF0) > lastF0 * 0.02) { lastF0 = f; try { osc.setPeriodicWave(formantWave(ctx, f, formants)); } catch (e) {} }
+                },
+                setLevel(v, t) {
+                    out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(v, t);
+                    // loudness also drives the noise/harmonic balance (more air when soft)
+                    nGain.gain.setValueAtTime((0.10 + breath * 0.5) * (0.6 + 0.4 * (1 - Math.min(1, v))), t);
+                },
+                setVowel(name2, t) {
+                    formants = VOWELS[name2];
+                    try { osc.setPeriodicWave(formantWave(ctx, lastF0, formants)); } catch (e) {}
+                    nb.forEach((n) => { n.bp.frequency.setValueAtTime(formants[n.idx].f, t); });
+                },
+                dispose() { try { osc.stop(); } catch (e) {} try { noise.stop(); } catch (e) {} try { out.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ── Klatt-style cascade formant synth (Klatt KLSYN, 1980) ───────────────
+        // A voicing source (+ aspiration) through a CASCADE of formant resonators;
+        // the series product yields the correct relative formant amplitudes.
+        if (technique === 'klatt') {
+            const out = ctx.createGain(); out.gain.value = 0;
+            let formants = VOWELS[vowelName];
+            const src = ctx.createOscillator(); src.setPeriodicWave(glottalWave(ctx)); src.detune.value = detuneCents;
+            const srcGain = ctx.createGain(); srcGain.gain.value = 1; src.connect(srcGain);
+            const asp = makeNoise(ctx); const aspGain = ctx.createGain(); aspGain.gain.value = 0.02 + breath * 0.25; asp.connect(aspGain);
+            const sum = ctx.createGain(); srcGain.connect(sum); aspGain.connect(sum);
+            // Cascade of peaking resonators: each boosts its formant while passing the
+            // rest of the source spectrum, so the series product is the vowel envelope
+            // (audible, unlike series band-pass which starves the fundamental).
+            const res = [];
+            let chain = sum;
+            for (let i = 0; i < 5; i++) {           // F1..F5 in cascade
+                const pk = ctx.createBiquadFilter(); pk.type = 'peaking';
+                pk.frequency.value = formants[i].f;
+                pk.Q.value = Math.max(0.7, formants[i].f / formants[i].bw);
+                pk.gain.value = 4 + 11 * formants[i].a;     // dB boost ∝ formant amplitude
+                chain.connect(pk); chain = pk; res.push(pk);
+            }
+            // A gentle low-shelf cut tames the un-radiated low end (lip radiation ~ +6dB/oct).
+            const tilt = ctx.createBiquadFilter(); tilt.type = 'highpass'; tilt.frequency.value = 90; tilt.Q.value = 0.5;
+            const makeup = ctx.createGain(); makeup.gain.value = 0.6; chain.connect(tilt); tilt.connect(makeup); makeup.connect(out);
+            src.start(ctx.currentTime); asp.start(ctx.currentTime);
+            return {
+                technique, output: out,
+                setFrequency(f, t, glide) {
+                    const target = f * detuneFactor;
+                    if (glide && glide > 0) { src.frequency.setValueAtTime(src.frequency.value || target, t); src.frequency.exponentialRampToValueAtTime(Math.max(1, target), t + glide); }
+                    else src.frequency.setValueAtTime(target, t);
+                },
+                setLevel(v, t) { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(v, t); },
+                setVowel(name2, t) {
+                    formants = VOWELS[name2];
+                    res.forEach((pk, i) => { pk.frequency.setValueAtTime(formants[i].f, t); pk.Q.setValueAtTime(Math.max(0.7, formants[i].f / formants[i].bw), t); pk.gain.setValueAtTime(4 + 11 * formants[i].a, t); });
+                },
+                dispose() { try { src.stop(); } catch (e) {} try { asp.stop(); } catch (e) {} try { out.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ── LPC — all-pole resonator bank (Atal/Itakura; TI Speak & Spell 1978) ──
+        // A bright impulse-train (voiced) / noise (unvoiced) excitation through a
+        // parallel bank of poles, plus a soft waveshaper for the iconic robotic grit.
+        if (technique === 'lpc') {
+            const out = ctx.createGain(); out.gain.value = 0;
+            let formants = VOWELS[vowelName];
+            const buzz = ctx.createOscillator(); buzz.setPeriodicWave(impulseWave(ctx)); buzz.detune.value = detuneCents;
+            const buzzGain = ctx.createGain(); buzzGain.gain.value = 1; buzz.connect(buzzGain);
+            const hiss = makeNoise(ctx); const hissGain = ctx.createGain(); hissGain.gain.value = 0.03 + breath * 0.3; hiss.connect(hissGain);
+            const grit = ctx.createWaveShaper();
+            const curve = new Float32Array(1024);
+            for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(2.2 * x); }
+            grit.curve = curve; grit.oversample = '2x';
+            const poles = formants.map((fm) => {
+                const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+                bp.frequency.value = fm.f; bp.Q.value = Math.max(0.7, fm.f / fm.bw);
+                const g = ctx.createGain(); g.gain.value = fm.a;
+                buzzGain.connect(bp); hissGain.connect(bp); bp.connect(g); g.connect(grit);
+                return { bp, g };
+            });
+            grit.connect(out);
+            buzz.start(ctx.currentTime); hiss.start(ctx.currentTime);
+            return {
+                technique, output: out,
+                setFrequency(f, t, glide) {
+                    const target = f * detuneFactor;
+                    if (glide && glide > 0) { buzz.frequency.setValueAtTime(buzz.frequency.value || target, t); buzz.frequency.exponentialRampToValueAtTime(Math.max(1, target), t + glide); }
+                    else buzz.frequency.setValueAtTime(target, t);
+                },
+                setLevel(v, t) { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(v, t); },
+                setVowel(name2, t) {
+                    formants = VOWELS[name2];
+                    poles.forEach((p, i) => { p.bp.frequency.setValueAtTime(formants[i].f, t); p.bp.Q.setValueAtTime(Math.max(0.7, formants[i].f / formants[i].bw), t); p.g.gain.setValueAtTime(formants[i].a, t); });
+                },
+                dispose() { try { buzz.stop(); } catch (e) {} try { hiss.stop(); } catch (e) {} try { out.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // Native-node techniques: 'formant' and 'additive' (also the fallback).
+        const out = ctx.createGain(); out.gain.value = 1;
+        const osc = ctx.createOscillator();
+        let formants = VOWELS[vowelName];
+
+        if (technique === 'additive') {
+            osc.setPeriodicWave(formantWave(ctx, 200, formants));
+        } else { // 'formant'
+            osc.setPeriodicWave(glottalWave(ctx));
+        }
+        osc.detune.value = detuneCents;
+
+        let bands = null, lastF0 = 200;
+        if (technique === 'formant') {
+            bands = formants.map((fm) => {
+                const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+                bp.frequency.value = fm.f; bp.Q.value = fm.f / fm.bw;
+                const g = ctx.createGain(); g.gain.value = fm.a;
+                osc.connect(bp); bp.connect(g); g.connect(out);
+                return { bp, g, bw: fm.bw };
+            });
+        } else {
+            osc.connect(out);
+        }
+        osc.start(ctx.currentTime);
+
+        return {
+            technique, output: out,
+            setFrequency(f, t, glide) {
+                const target = f * detuneFactor;
+                if (glide && glide > 0) { osc.frequency.setValueAtTime(osc.frequency.value || target, t); osc.frequency.exponentialRampToValueAtTime(Math.max(1, target), t + glide); }
+                else osc.frequency.setValueAtTime(target, t);
+                if (technique === 'additive' && Math.abs(f - lastF0) > lastF0 * 0.02) {
+                    lastF0 = f; try { osc.setPeriodicWave(formantWave(ctx, f, formants)); } catch (e) {}
+                }
+            },
+            setLevel(v, t) { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(v, t); },
+            setVowel(name2, t) {
+                formants = VOWELS[name2];
+                if (technique === 'formant' && bands) {
+                    bands.forEach((b, i) => { b.bp.frequency.setValueAtTime(formants[i].f, t); b.bp.Q.setValueAtTime(formants[i].f / formants[i].bw, t); b.g.gain.setValueAtTime(formants[i].a, t); });
+                } else if (technique === 'additive') {
+                    try { osc.setPeriodicWave(formantWave(ctx, lastF0, formants)); } catch (e) {}
+                }
+            },
+            dispose() { try { osc.stop(); } catch (e) {} try { out.disconnect(); } catch (e) {} }
+        };
+    }
+
+    // Ordered earliest → most modern, so the explorer walks history left-to-right.
+    const TECHNIQUES = [
+        { id: 'vocoder',  name: 'Channel vocoder', blurb: 'Buzz + hiss split through a band-pass bank gated by the vowel envelope — Dudley\'s VODER (1939).' },
+        { id: 'formant',  name: 'Formant filter',  blurb: 'A glottal-pulse oscillator through parallel resonant band-pass formants (source–filter, PAT/OVE).' },
+        { id: 'klatt',    name: 'Klatt cascade',   blurb: 'A voicing source + aspiration through a cascade of formant resonators — KLSYN / DECtalk (1980).' },
+        { id: 'tract',    name: 'Vocal tract',     blurb: 'A Kelly–Lochbaum waveguide of the vocal tract, excited by a glottal pulse (physical model, 1962).' },
+        { id: 'lpc',      name: 'LPC (all-pole)',  blurb: 'A bright impulse/noise excitation through an all-pole resonator bank — Speak & Spell (1978).' },
+        { id: 'fof',      name: 'FOF (CHANT)',     blurb: 'Overlapping formant grains, one burst per glottal pulse — the IRCAM CHANT method (1979).' },
+        { id: 'additive', name: 'Additive / SMS',  blurb: 'A sum of harmonics tracing the vowel formant envelope (sinusoidal / spectral modelling, 1986).' },
+        { id: 'ddsp',     name: 'DDSP harmonic+noise', blurb: 'A harmonic oscillator bank summed with formant-shaped filtered noise — the neural bridge (2020).' }
+    ];
+
+    global.VocalVoices = { init, hasWorklets, create, VOWELS, TRACT_VOWELS, TECHNIQUES };
+})(typeof self !== 'undefined' ? self : this);
+
+</script>
+    <script>
+/**
+ * Vocal Synthesis — Explorer UI Controller
+ *
+ * Drives the interchangeable engines in vocal-voices.js. Lets you A/B every
+ * technique on the SAME pitch + vowel while a note or phrase sustains, so the
+ * timbral difference between (say) a 1939 vocoder and a 2020 DDSP model is
+ * audible on a single held tone.
+ *
+ * Exposes a global `engine` with ctx / isPlaying / getAnalyserData() /
+ * getFrequencyData() so the shared test harness can smoke-test the audio.
+ */
+
+// ── Per-technique history (name / era / description / key names & dates) ─────
+const TECH_INFO = {
+    vocoder: {
+        title: 'Channel Vocoder / VODER',
+        era: '1938–1939 · Bell Labs',
+        who: 'Homer Dudley',
+        body: 'The first electrical voice synthesizer. Dudley split a buzz (a pulse train at the pitch) and a hiss (noise) through a bank of band-pass filters, each scaled by the loudness in that band. Reverse the analysis and you can drive those bands by hand: the VODER, demonstrated at the 1939 World\'s Fair, was literally played on a keyboard by trained operators. Here the band gains are set from the chosen vowel\'s formant envelope.'
+    },
+    formant: {
+        title: 'Formant Filter (source–filter)',
+        era: '1953–1980 · Edinburgh / Stockholm',
+        who: 'Walter Lawrence (PAT) · Gunnar Fant (OVE)',
+        body: 'The source–filter model made explicit: a glottal-pulse oscillator (the "source") passed through a set of parallel resonant band-pass filters tuned to the vowel\'s formants (the "filter", i.e. the vocal tract). PAT (Parametric Artificial Talker, 1953) used parallel resonators; Fant\'s OVE used a cascade. This is the workhorse of classic formant speech and singing synthesis.'
+    },
+    klatt: {
+        title: 'Klatt Cascade Formant Synth',
+        era: '1980 · MIT',
+        who: 'Dennis Klatt (KLSYN → DECtalk)',
+        body: 'Klatt\'s synthesizer refined the cascade: a carefully modelled voicing source plus aspiration and frication noise, driven through a cascade of formant resonators for vowels (whose series product gives the correct relative formant amplitudes automatically) and a parallel branch for consonants. It became DECtalk — and so the voice of Stephen Hawking.'
+    },
+    tract: {
+        title: 'Articulatory Vocal-Tract Waveguide',
+        era: '1961–1962 · Bell Labs',
+        who: 'Kelly & Lochbaum · (later Pink Trombone, 2017)',
+        body: 'Instead of modelling the sound, model the tube. The Kelly–Lochbaum digital waveguide treats the vocal tract as a ladder of cylindrical sections; the vowel is an area function and the acoustics fall out of the physics. On an IBM 704 in 1961 it sang "Daisy Bell" — the first singing computer, and the scene Kubrick gave to HAL 9000.'
+    },
+    lpc: {
+        title: 'Linear Predictive Coding (LPC)',
+        era: '1971–1978 · Bell Labs / TI',
+        who: 'Atal & Hanauer · Itakura · TI Speak & Spell',
+        body: 'LPC represents the vocal tract as an all-pole filter whose coefficients are predicted from the signal, excited by a pulse train (voiced) or noise (unvoiced). Cheap enough to put on a single chip: the TI Speak & Spell (1978, TMS5100) is the iconic robotic voice of a generation. Here an all-pole resonator bank driven by a bright impulse train recreates that grit.'
+    },
+    fof: {
+        title: 'FOF / CHANT',
+        era: '1979–1984 · IRCAM',
+        who: 'Rodet, Potard & Barrière',
+        body: 'Fonction d\'Onde Formantique: build the voice from overlapping formant grains — one short exponentially-decaying burst per glottal period, per formant. Each grain\'s decay sets the formant bandwidth; their overlap re-creates the resonance. CHANT produced the most convincingly sung synthetic voices of its era, including IRCAM\'s famous synthetic choir. It is the default engine across this collection\'s early-music apps.'
+    },
+    additive: {
+        title: 'Additive / Sinusoidal (SMS)',
+        era: '1986–1990 · MIT / Stanford',
+        who: 'McAulay–Quatieri · Serra & Smith (SMS)',
+        body: 'Model the voice as a sum of sinusoids. The harmonics of the pitch are given amplitudes that trace the vowel\'s formant envelope, rebuilt as the pitch moves so the formants stay put. Spectral Modelling Synthesis (SMS) adds a stochastic residual (filtered noise) for breathiness — the deterministic-plus-stochastic split that underlies much later analysis/synthesis.'
+    },
+    ddsp: {
+        title: 'DDSP — Harmonic + Filtered Noise',
+        era: '2020 · Google Magenta',
+        who: 'Engel, Hantrakul, Gu & Roberts',
+        body: 'Differentiable DSP puts a classic harmonic-plus-noise synthesizer inside a neural network: a harmonic oscillator bank and a time-varying filtered-noise generator are driven by loudness and pitch envelopes a network predicts. The synthesis itself is fully interpretable and runs in real time — the bridge from a century of signal models to the neural era. This demo runs the DSP half live.'
+    }
+};
+
+// A little melody (semitone offsets from the base) + vowels, for phrase mode.
+const PHRASE = [
+    { d: 0, v: 'a' }, { d: 2, v: 'e' }, { d: 4, v: 'i' }, { d: 5, v: 'o' },
+    { d: 7, v: 'u' }, { d: 9, v: 'o' }, { d: 7, v: 'i' }, { d: 5, v: 'e' },
+    { d: 4, v: 'a' }, { d: 2, v: 'e' }, { d: 0, v: 'a' }, { d: 0, v: 'a' }
+];
+
+// ── The audio engine ─────────────────────────────────────────────────────────
+class VocalExplorer {
+    constructor() {
+        this.ctx = null;
+        this.isPlaying = false;
+        this.analyser = null;
+        this.voice = null;
+        this.technique = 'fof';
+        this.vowel = 'a';
+        this.pitch = 196.0;          // G3
+        this.mode = 'sustain';       // 'sustain' | 'phrase'
+        this.phraseTimer = null;
+        this.phraseStep = 0;
+    }
+
+    _buildGraph() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.voiceBus = this.ctx.createGain(); this.voiceBus.gain.value = 0;
+        this.limiter = this.ctx.createDynamicsCompressor();
+        this.limiter.threshold.value = -10; this.limiter.knee.value = 12;
+        this.limiter.ratio.value = 12; this.limiter.attack.value = 0.003; this.limiter.release.value = 0.2;
+        this.masterGain = this.ctx.createGain(); this.masterGain.gain.value = 0.9;
+        this.analyser = this.ctx.createAnalyser();
+        this.analyser.fftSize = 2048; this.analyser.smoothingTimeConstant = 0.82;
+        this.voiceBus.connect(this.limiter);
+        this.limiter.connect(this.masterGain);
+        this.masterGain.connect(this.ctx.destination);
+        this.masterGain.connect(this.analyser);
+    }
+
+    async begin() {
+        if (!this.ctx) this._buildGraph();
+        if (this.ctx.state === 'suspended') await this.ctx.resume();
+        await VocalVoices.init(this.ctx);
+        this.isPlaying = true;
+        this.phraseStep = 0;
+        this.buildVoice();
+        // Click-free fade-in of the whole voice bus.
+        const t = this.ctx.currentTime;
+        this.voiceBus.gain.cancelScheduledValues(t);
+        this.voiceBus.gain.setValueAtTime(this.voiceBus.gain.value, t);
+        this.voiceBus.gain.linearRampToValueAtTime(1, t + 0.08);
+        if (this.mode === 'phrase') this._startPhrase();
+    }
+
+    // (Re)create the current technique's voice and gate it on. Called on start
+    // AND whenever the technique changes mid-play → instant A/B on the same note.
+    buildVoice() {
+        const t = this.ctx.currentTime;
+        if (this.voice) {
+            try { this.voice.setLevel(0, t); } catch (e) {}
+            const old = this.voice;
+            setTimeout(() => { try { old.dispose(); } catch (e) {} }, 150);
+        }
+        this.voice = VocalVoices.create(this.ctx, {
+            technique: this.technique, vowel: this.vowel, breath: 0.06, vibDepth: 0.006
+        });
+        this.voice.output.connect(this.voiceBus);
+        this.voice.setFrequency(this.pitch, t, 0);
+        this.voice.setVowel(this.vowel, t);
+        this.voice.setLevel(1, t + 0.01);
+    }
+
+    _startPhrase() {
+        this._stopPhrase();
+        const stepDur = 620;   // ms per note
+        const tick = () => {
+            if (!this.isPlaying || !this.voice) return;
+            const s = PHRASE[this.phraseStep % PHRASE.length];
+            const f = this.pitch * Math.pow(2, s.d / 12);
+            const t = this.ctx.currentTime;
+            this.voice.setFrequency(f, t, 0.08);
+            this.voice.setVowel(s.v, t);
+            this.phraseStep++;
+        };
+        tick();
+        this.phraseTimer = setInterval(tick, stepDur);
+    }
+
+    _stopPhrase() { if (this.phraseTimer) { clearInterval(this.phraseTimer); this.phraseTimer = null; } }
+
+    end() {
+        this._stopPhrase();
+        if (this.ctx && this.voiceBus) {
+            const t = this.ctx.currentTime;
+            this.voiceBus.gain.cancelScheduledValues(t);
+            this.voiceBus.gain.setValueAtTime(this.voiceBus.gain.value, t);
+            this.voiceBus.gain.linearRampToValueAtTime(0, t + 0.12);
+        }
+        const old = this.voice; this.voice = null;
+        setTimeout(() => { if (old) { try { old.setLevel(0, this.ctx.currentTime); old.dispose(); } catch (e) {} } }, 200);
+        this.isPlaying = false;
+    }
+
+    setTechnique(id) {
+        this.technique = id;
+        if (this.isPlaying) this.buildVoice();     // A/B swap, note keeps sounding
+    }
+
+    setVowel(v) {
+        this.vowel = v;
+        if (this.isPlaying && this.voice && this.mode === 'sustain') {
+            this.voice.setVowel(v, this.ctx.currentTime);
+        }
+    }
+
+    setPitch(hz) {
+        this.pitch = hz;
+        if (this.isPlaying && this.voice && this.mode === 'sustain') {
+            this.voice.setFrequency(hz, this.ctx.currentTime, 0.06);
+        }
+    }
+
+    setMode(m) {
+        this.mode = m;
+        if (!this.isPlaying) return;
+        if (m === 'phrase') { this.phraseStep = 0; this._startPhrase(); }
+        else {
+            this._stopPhrase();
+            if (this.voice) { this.voice.setFrequency(this.pitch, this.ctx.currentTime, 0.06); this.voice.setVowel(this.vowel, this.ctx.currentTime); }
+        }
+    }
+
+    getAnalyserData() {
+        if (!this.analyser) return null;
+        const d = new Uint8Array(this.analyser.frequencyBinCount);
+        this.analyser.getByteTimeDomainData(d);
+        return d;
+    }
+    getFrequencyData() {
+        if (!this.analyser) return null;
+        const d = new Uint8Array(this.analyser.frequencyBinCount);
+        this.analyser.getByteFrequencyData(d);
+        return d;
+    }
+}
+
+const engine = new VocalExplorer();
+if (typeof window !== 'undefined') window.engine = engine;
+let animationId = null;
+
+// ── Transport ────────────────────────────────────────────────────────────────
+async function toggleChant() {
+    const btn = document.getElementById('btnChant');
+    const icon = document.getElementById('mainIcon');
+    if (!engine.isPlaying) {
+        await engine.begin();
+        btn.classList.add('playing');
+        btn.querySelector('.btn-text').textContent = 'Silence';
+        btn.querySelector('.btn-icon').textContent = '■';
+        if (icon) icon.classList.add('active');
+        startVisualization();
+    } else {
+        engine.end();
+        btn.classList.remove('playing');
+        btn.querySelector('.btn-text').textContent = 'Give Voice';
+        btn.querySelector('.btn-icon').textContent = '♪';
+        if (icon) icon.classList.remove('active');
+        stopVisualization();
+    }
+}
+
+// ── Controls ─────────────────────────────────────────────────────────────────
+function selectTechnique(id) {
+    document.querySelectorAll('.tech-btn').forEach(b => b.classList.toggle('active', b.dataset.tech === id));
+    engine.setTechnique(id);
+    renderInfo(id);
+}
+function selectVowel(v) {
+    document.querySelectorAll('.vowel-btn').forEach(b => b.classList.toggle('active', b.dataset.vowel === v));
+    engine.setVowel(v);
+}
+function selectPitch(hz, el) {
+    document.querySelectorAll('.pitch-btn').forEach(b => b.classList.remove('active'));
+    if (el) el.classList.add('active');
+    engine.setPitch(parseFloat(hz));
+}
+function selectMode(m) {
+    document.querySelectorAll('.transport-mode .mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+    engine.setMode(m);
+}
+
+function renderInfo(id) {
+    const info = TECH_INFO[id];
+    if (!info) return;
+    document.getElementById('infoTitle').textContent = info.title;
+    document.getElementById('infoEra').textContent = info.era;
+    document.getElementById('infoWho').textContent = info.who;
+    document.getElementById('infoBody').textContent = info.body;
+}
+
+// Build technique + vowel + pitch buttons from the library / tables.
+function buildControls() {
+    const techWrap = document.getElementById('techButtons');
+    VocalVoices.TECHNIQUES.forEach((t, i) => {
+        const b = document.createElement('button');
+        b.className = 'tech-btn' + (t.id === engine.technique ? ' active' : '');
+        b.dataset.tech = t.id;
+        b.innerHTML = `${t.name}<small>${t.blurb}</small>`;
+        b.title = t.blurb;
+        b.onclick = () => selectTechnique(t.id);
+        techWrap.appendChild(b);
+    });
+    renderInfo(engine.technique);
+}
+
+// ── Visualization (candlelit spectrum + waveform, à la Synth Gregorian) ───────
+function startVisualization() {
+    const canvas = document.getElementById('vizCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+    canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    const width = canvas.offsetWidth, height = canvas.offsetHeight;
+
+    function draw() {
+        animationId = requestAnimationFrame(draw);
+        const waveData = engine.getAnalyserData();
+        const freqData = engine.getFrequencyData();
+        if (!waveData || !freqData) return;
+
+        ctx.fillStyle = 'rgba(14, 11, 6, 0.32)';
+        ctx.fillRect(0, 0, width, height);
+
+        // Faint staff lines
+        ctx.strokeStyle = 'rgba(200, 168, 78, 0.10)';
+        ctx.lineWidth = 1;
+        for (let l = 1; l <= 4; l++) {
+            const y = height * (0.25 + l * 0.11);
+            ctx.beginPath(); ctx.moveTo(20, y); ctx.lineTo(width - 20, y); ctx.stroke();
+        }
+
+        // Formant spectrum as candlelight (log-ish emphasis on low bins where formants live)
+        const barCount = 80;
+        const barWidth = width / barCount;
+        const usable = Math.floor(freqData.length * 0.55);
+        for (let i = 0; i < barCount; i++) {
+            const idx = Math.floor(Math.pow(i / barCount, 1.4) * usable);
+            const value = freqData[idx] / 255;
+            const barHeight = value * height * 0.72;
+            const x = i * barWidth;
+            const g = ctx.createLinearGradient(x, height, x, height - barHeight);
+            g.addColorStop(0, `rgba(200, 168, 78, ${0.1 + value * 0.4})`);
+            g.addColorStop(0.5, `rgba(240, 214, 122, ${value * 0.35})`);
+            g.addColorStop(1, `rgba(122, 31, 31, ${value * 0.25})`);
+            ctx.fillStyle = g;
+            ctx.fillRect(x + 1, height - barHeight, barWidth - 2, barHeight);
+        }
+
+        // Flowing waveform
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(240, 214, 122, 0.6)';
+        ctx.lineWidth = 1.5;
+        const slice = width / waveData.length;
+        let x = 0;
+        for (let i = 0; i < waveData.length; i++) {
+            const v = waveData[i] / 128.0;
+            const y = (v * height) / 2;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            x += slice;
+        }
+        ctx.stroke();
+    }
+    draw();
+}
+
+function stopVisualization() {
+    if (animationId) { cancelAnimationFrame(animationId); animationId = null; }
+    const canvas = document.getElementById('vizCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.offsetWidth, height = canvas.offsetHeight;
+    let alpha = 1;
+    function fade() {
+        ctx.fillStyle = 'rgba(14, 11, 6, 0.06)';
+        ctx.fillRect(0, 0, width, height);
+        alpha -= 0.02;
+        if (alpha > 0) requestAnimationFrame(fade);
+    }
+    fade();
+}
+
+function paintIdleCanvas() {
+    const canvas = document.getElementById('vizCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+    canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    ctx.fillStyle = 'rgba(14, 11, 6, 1)';
+    ctx.fillRect(0, 0, canvas.offsetWidth, canvas.offsetHeight);
+    ctx.strokeStyle = 'rgba(200, 168, 78, 0.12)';
+    ctx.lineWidth = 1;
+    for (let l = 1; l <= 4; l++) {
+        const y = canvas.offsetHeight * (0.25 + l * 0.11);
+        ctx.beginPath(); ctx.moveTo(20, y); ctx.lineTo(canvas.offsetWidth - 20, y); ctx.stroke();
+    }
+    ctx.font = '14px Cinzel, serif';
+    ctx.fillStyle = 'rgba(200, 168, 78, 0.35)';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press "Give Voice" — then switch technique to A/B the same note', canvas.offsetWidth / 2, canvas.offsetHeight / 2 + 4);
+}
+
+window.addEventListener('resize', () => { if (engine.isPlaying) { stopVisualization(); startVisualization(); } else { paintIdleCanvas(); } });
+
+window.addEventListener('DOMContentLoaded', () => {
+    buildControls();
+    paintIdleCanvas();
+});
+
+</script>
+</body>
+</html>

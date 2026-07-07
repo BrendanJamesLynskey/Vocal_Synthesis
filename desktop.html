@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vocal Synthesis — An Explorer of Singing-Voice Synthesis</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Cinzel:wght@400;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="icon-border-top"></div>
+
+    <header>
+        <div class="cross-ornament">&#x2626;</div>
+        <h1>Vocal Synthesis</h1>
+        <p class="subtitle">The Machine Made to Sing &#8226; Earliest to Modern</p>
+        <div class="cross-ornament">&#x2626;</div>
+    </header>
+
+    <main>
+        <!-- Illuminated initial: a larynx / waveform "V" -->
+        <div class="icon-frame" id="mainIcon">
+            <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Illuminated initial V — a singing larynx">
+                <defs>
+                    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0" stop-color="#f0d67a"/><stop offset="0.5" stop-color="#c8a84e"/><stop offset="1" stop-color="#8b6914"/>
+                    </linearGradient>
+                    <radialGradient id="halo" cx="0.5" cy="0.4" r="0.7">
+                        <stop offset="0" stop-color="#3a5a7a"/><stop offset="1" stop-color="#16233a"/>
+                    </radialGradient>
+                </defs>
+                <rect x="8" y="8" width="184" height="184" rx="6" fill="url(#halo)" stroke="#8b6914" stroke-width="2"/>
+                <rect x="16" y="16" width="168" height="168" rx="4" fill="none" stroke="#7a1f1f" stroke-width="1.5" opacity="0.7"/>
+                <!-- vine flourishes -->
+                <path d="M28 30 q20 -14 44 -4 M172 30 q-20 -14 -44 -4 M28 170 q20 14 44 4 M172 170 q-20 14 -44 4" fill="none" stroke="#c8a84e" stroke-width="1.4" opacity="0.55"/>
+                <circle cx="30" cy="30" r="3.5" fill="#a83232"/><circle cx="170" cy="30" r="3.5" fill="#a83232"/>
+                <circle cx="30" cy="170" r="3.5" fill="#a83232"/><circle cx="170" cy="170" r="3.5" fill="#a83232"/>
+                <!-- initial V -->
+                <text x="100" y="140" text-anchor="middle" font-family="UnifrakturMaguntia, serif" font-size="150" fill="url(#gold)" stroke="#5a4408" stroke-width="1.2">V</text>
+                <!-- a sound-wave / vocal-fold ripple crossing the initial -->
+                <g opacity="0.85" stroke="#e8d9b0" stroke-width="1.6" fill="none">
+                    <path d="M40 96 q10 -22 20 0 t20 0 t20 0 t20 0 t20 0 t20 0"/>
+                </g>
+                <path d="M40 96 q10 -22 20 0 t20 0 t20 0 t20 0 t20 0 t20 0" fill="none" stroke="#7a1f1f" stroke-width="1" opacity="0.6" transform="translate(0,4)"/>
+            </svg>
+        </div>
+
+        <div class="controls-panel">
+            <div class="ornament-line"><span class="ornament-dot"></span><span class="ornament-rule"></span><span class="ornament-cross">&#x2626;</span><span class="ornament-rule"></span><span class="ornament-dot"></span></div>
+
+            <div class="transport">
+                <button class="btn-chant" id="btnChant" onclick="toggleChant()">
+                    <span class="btn-icon">&#x266A;</span>
+                    <span class="btn-text">Give Voice</span>
+                </button>
+            </div>
+
+            <p class="ab-hint">While it sounds, switch <strong>Technique</strong> to A/B the very same pitch &amp; vowel across three centuries of method.</p>
+
+            <!-- Technique picker (generated from VocalVoices.TECHNIQUES) -->
+            <div class="control-group">
+                <label class="control-label">&#x2726; Technique &mdash; earliest &rarr; modern</label>
+                <div class="tech-selector" id="techButtons"></div>
+            </div>
+
+            <!-- Vowel -->
+            <div class="control-group">
+                <label class="control-label">&#x2726; Vowel</label>
+                <div class="mode-selector vowel-selector">
+                    <button class="vowel-btn active" data-vowel="a" onclick="selectVowel('a')">A<small>father</small></button>
+                    <button class="vowel-btn" data-vowel="e" onclick="selectVowel('e')">E<small>bet</small></button>
+                    <button class="vowel-btn" data-vowel="i" onclick="selectVowel('i')">I<small>see</small></button>
+                    <button class="vowel-btn" data-vowel="o" onclick="selectVowel('o')">O<small>go</small></button>
+                    <button class="vowel-btn" data-vowel="u" onclick="selectVowel('u')">U<small>boot</small></button>
+                </div>
+            </div>
+
+            <div class="sliders-grid two">
+                <!-- Pitch -->
+                <div class="control-group">
+                    <label class="control-label">&#x2726; Pitch</label>
+                    <div class="mode-selector pitch-selector">
+                        <button class="pitch-btn" data-hz="130.81" onclick="selectPitch(130.81,this)">C3</button>
+                        <button class="pitch-btn" data-hz="164.81" onclick="selectPitch(164.81,this)">E3</button>
+                        <button class="pitch-btn active" data-hz="196.00" onclick="selectPitch(196.00,this)">G3</button>
+                        <button class="pitch-btn" data-hz="261.63" onclick="selectPitch(261.63,this)">C4</button>
+                        <button class="pitch-btn" data-hz="329.63" onclick="selectPitch(329.63,this)">E4</button>
+                    </div>
+                </div>
+                <!-- Sustain vs phrase -->
+                <div class="control-group">
+                    <label class="control-label">&#x2726; Transport</label>
+                    <div class="mode-selector transport-mode">
+                        <button class="mode-btn active" data-mode="sustain" onclick="selectMode('sustain')">Sustain</button>
+                        <button class="mode-btn" data-mode="phrase" onclick="selectMode('phrase')">Phrase</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="ornament-line"><span class="ornament-dot"></span><span class="ornament-rule"></span><span class="ornament-cross">&#x2626;</span><span class="ornament-rule"></span><span class="ornament-dot"></span></div>
+        </div>
+
+        <div class="visualization-frame">
+            <canvas id="vizCanvas" width="800" height="200"></canvas>
+        </div>
+
+        <!-- Selected-technique dossier -->
+        <div class="about-panel">
+            <h2 id="infoTitle">FOF / CHANT</h2>
+            <div class="era" id="infoEra">1979–1984 · IRCAM</div>
+            <div class="who" id="infoWho">Rodet, Potard &amp; Barrière</div>
+            <p id="infoBody"></p>
+            <div class="lineage">
+                <h3>The full story</h3>
+                <p>This explorer implements eight techniques live; the complete timeline &mdash; from the mechanical talking machines of <em>Kratzenstein</em> (1779) and <em>von Kempelen</em> (1791), through the vocoder, formant synths, the first singing computer, LPC, FOF, PSOLA, VOCALOID and the neural era (WaveNet, DDSP, DiffSinger) &mdash; is written up in the history.</p>
+                <div class="lineage-chain">
+                    <a href="HISTORY.md">Read the history &rarr;</a>
+                    <a href="https://brendanjameslynskey.github.io/Synth_Organum/">Synth&nbsp;Organum (uses these engines)</a>
+                    <a href="https://github.com/BrendanJamesLynskey/DSP_and_Music">DSP &amp; Music collection</a>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="cross-ornament small">&#x2626;</div>
+        <p>Vox humana ex machina</p>
+        <p class="latin">the human voice, out of the machine</p>
+    </footer>
+
+    <script src="vocal-voices.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
