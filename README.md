@@ -59,7 +59,6 @@ Open <http://localhost:8080> and press **Give Voice**. Any static file server wo
 | `app.js` | Explorer engine + UI controller + spectrum/waveform visualizer |
 | `vocal_mobile.html` | Self-contained mobile version (single bundled file) |
 | `HISTORY.md` | The full written history of vocal synthesis, 1779 → today |
-| `DIRECTIONS.md` | Project roadmap and technique table (developer handoff) |
 
 ## The library API
 
