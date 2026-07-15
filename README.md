@@ -1,6 +1,8 @@
 # Vocal Synthesis — The Machine Made to Sing
 
-An interactive, dependency-free explorer of **singing-voice synthesis techniques**, from the earliest electrical voice machines to the neural era. Eight genuinely different methods of making a sung voice — all implemented **live in the browser** with only the Web Audio API. **No samples, no libraries, no external assets** (bar Google Fonts). Hold one note and switch technique to **A/B a century of method** on the very same pitch and vowel.
+An interactive explorer of the **singing voice** — from a **real sampled choir** to a century of pure-synthesis techniques. The flagship voice plays **actual recorded sung vowels** (from the [VocalSet](https://zenodo.org/records/1193957) corpus), looped seamlessly and mapped across pitch with **formant-preserving pitch-shifting** (TD-PSOLA) so the vocal-tract resonances stay put as the note moves. Alongside it sit eight genuinely different **pure-synthesis** methods, from the earliest electrical voice machines to the neural era — all live in the browser with only the Web Audio API. Hold one note and switch voice to **A/B real recordings against a century of synthesis** on the very same pitch and vowel.
+
+> **Credit:** the sampled voice uses [**VocalSet**](https://zenodo.org/records/1193957) (Wilkins, Seetharaman, Wahl & Pardo, ISMIR 2018), licensed **CC BY 4.0**. The bundled loops in [`voices/`](voices/) are short, looped, pitch-shifted excerpts derived from it.
 
 **[Launch the app](https://brendanjameslynskey.github.io/Vocal_Synthesis/)** — auto-detects your device and recommends desktop or mobile.
 
@@ -20,6 +22,7 @@ Ordered earliest → most modern (the order they appear in the explorer). Each l
 
 | id | Era | Technique — one-liner |
 |---|---|---|
+| **`sampler`** | 1986→ (live) | **Sampled voice** — real recorded VocalSet vowels, looped and pitch-mapped with formant-preserving TD-PSOLA + a detuned ensemble; the most realistic voice and the default |
 | **`vocoder`** | 1938–39 | [Channel vocoder / VODER](HISTORY.md#3-the-vocoder-and-the-voder-19381939--vocoder) — buzz + hiss through a band-pass bank gated by the vowel envelope (Dudley, Bell Labs) |
 | **`formant`** | 1953–80 | [Formant filter](HISTORY.md#4-electronic-formant-synthesizers-19531980--formant-klatt) — a glottal-pulse source through parallel resonant formants (PAT / OVE) |
 | **`klatt`** | 1980 | [Klatt cascade](HISTORY.md#4-electronic-formant-synthesizers-19531980--formant-klatt) — voicing source + aspiration through a cascade of formant resonators (KLSYN → DECtalk) |

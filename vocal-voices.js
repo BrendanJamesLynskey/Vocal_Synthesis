@@ -1,6 +1,8 @@
 /**
  * vocal-voices.js — a small library of interchangeable VOCAL SYNTHESIS engines
- * for the Web Audio API, sharing one interface. No samples, no dependencies.
+ * for the Web Audio API, sharing one interface. The 'sampler' engine plays real
+ * recorded vowels (VocalSet, CC BY 4.0) from ./voices/; every other engine is
+ * pure synthesis with no samples or dependencies.
  *
  * Techniques (each a genuinely different way of making a sung voice):
  *
@@ -30,6 +32,13 @@
  */
 (function (global) {
     'use strict';
+
+    // Directory this script was loaded from, so the sampled-voice assets in
+    // ./voices/ resolve correctly however the page is hosted.
+    const SCRIPT_DIR = (function () {
+        try { const s = document.currentScript && document.currentScript.src; if (s) return s.replace(/[^/]*$/, ''); } catch (e) {}
+        return '';
+    })();
 
     // ── Sung-vowel formant tables: five formants {f: Hz, a: amp, bw: Hz} ─────────
     const VOWELS = {
@@ -131,18 +140,45 @@
     // worklets whose modules were added to it), so the library is safe even if
     // an app builds more than one context.
     async function init(ctx) {
-        if (ctx.__vocalWorklets) return true;
-        try {
-            for (const src of [FOF_SRC, TRACT_SRC]) {
-                const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
-                await ctx.audioWorklet.addModule(url);
+        if (!ctx.__vocalWorklets) {
+            try {
+                for (const src of [FOF_SRC, TRACT_SRC]) {
+                    const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+                    await ctx.audioWorklet.addModule(url);
+                }
+                ctx.__vocalWorklets = true;
+            } catch (e) {
+                ctx.__vocalWorklets = false;
             }
-            ctx.__vocalWorklets = true;
-        } catch (e) {
-            ctx.__vocalWorklets = false;
         }
+        await loadSamples(ctx);           // decode the real-voice sample bank (safe if it 404s)
         return !!ctx.__vocalWorklets;
     }
+
+    // ── Sampled-voice bank (real VocalSet vowels, formant-preserving pitch grid) ──
+    // Loaded once per context. Each loop is a seamless, steady sung vowel at a
+    // known pitch; the runtime detunes the nearest loop by ≤ a few semitones.
+    async function loadSamples(ctx) {
+        if (ctx.__vocalSamples || ctx.__vocalSamplesTried) return ctx.__vocalSamples;
+        ctx.__vocalSamplesTried = true;
+        const base = api.sampleBase || (SCRIPT_DIR + 'voices/');
+        try {
+            const grid = await (await fetch(base + 'grid.json')).json();
+            const map = {}, byPartVowel = {};
+            await Promise.all(grid.map(async (g) => {
+                const ab = await (await fetch(base + g.file)).arrayBuffer();
+                const buffer = await ctx.decodeAudioData(ab);
+                const key = g.part + '_' + g.midi + '_' + g.vowel;
+                map[key] = { buffer, hz: g.hz, midi: g.midi, part: g.part, vowel: g.vowel };
+                const pk = g.part + '|' + g.vowel;
+                (byPartVowel[pk] = byPartVowel[pk] || []).push({ midi: g.midi, key });
+            }));
+            for (const k in byPartVowel) byPartVowel[k].sort((a, b) => a.midi - b.midi);
+            ctx.__vocalSamples = { map, byPartVowel };
+        } catch (e) { ctx.__vocalSamples = null; }
+        return ctx.__vocalSamples;
+    }
+    function hasSamples(ctx) { return !!(ctx && ctx.__vocalSamples); }
 
     function hasWorklets(ctx) { return !!(ctx && ctx.__vocalWorklets); }
 
@@ -233,6 +269,102 @@
                     else node.port.postMessage({ shape: TRACT_VOWELS[name2] });
                 },
                 dispose() { try { node.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ── Sampled real voice (VocalSet vowels, formant-preserving pitch grid) ──
+        // The most realistic engine: it plays actual recorded sung vowels, looped
+        // seamlessly, choosing the nearest pitch in the sample grid and detuning it
+        // by only a few semitones (so the vocal-tract formants stay put — no
+        // "chipmunk"). A small detuned/panned ensemble gives a choral width, and a
+        // gentle vibrato LFO rides each voice's detune.
+        if (technique === 'sampler' && hasSamples(ctx)) {
+            const bank = ctx.__vocalSamples;
+            const voicePref = opts.voice || 'auto';           // 'auto' | 'male' | 'female'
+            const size = opts.ensemble != null ? opts.ensemble : 3;
+            const vibDepthCents = opts.vibCents != null ? opts.vibCents : (vibDepth * 1200); // reuse vibDepth (ratio) → cents
+            const vibRate = opts.vibRate != null ? opts.vibRate : (4.6 + Math.random() * 1.2);
+
+            const out = ctx.createGain(); out.gain.value = 0;   // voice gate
+            // shared vibrato LFO → depth gain → fans out to every source.detune
+            const lfo = ctx.createOscillator(); lfo.frequency.value = vibRate;
+            const lfoDepth = ctx.createGain(); lfoDepth.gain.value = vibDepthCents;
+            lfo.connect(lfoDepth); lfo.start(ctx.currentTime + Math.random() * 0.1);
+
+            const hzToMidi = (hz) => 69 + 12 * Math.log2(hz / 440);
+            function pickPart(midi) {
+                if (voicePref === 'male') return 'm';
+                if (voicePref === 'female') return 'f';
+                return midi < 66 ? 'm' : 'f';                   // overlap at F#4
+            }
+            function pickLoop(vowelName, hz) {
+                const midi = hzToMidi(hz), part = pickPart(midi);
+                let list = bank.byPartVowel[part + '|' + vowelName] || bank.byPartVowel['m|' + vowelName] || bank.byPartVowel['f|' + vowelName];
+                if (!list || !list.length) return null;
+                let best = list[0], bd = Math.abs(list[0].midi - midi);
+                for (const e of list) { const d = Math.abs(e.midi - midi); if (d < bd) { bd = d; best = e; } }
+                return bank.map[best.key];
+            }
+
+            let current = null, curVowel = vowelName, curHz = 200;
+
+            function spawn(vowelName2, hz, atTime, glide, prevSet) {
+                const loop = pickLoop(vowelName2, hz);
+                if (!loop) return null;
+                const setGain = ctx.createGain(); setGain.gain.value = 0; setGain.connect(out);
+                const baseCents = 1200 * Math.log2(hz / loop.hz) + detuneCents;
+                const srcs = [];
+                for (let i = 0; i < size; i++) {
+                    const spread = size > 1 ? (i / (size - 1) - 0.5) : 0;   // -0.5..0.5
+                    const s = ctx.createBufferSource(); s.buffer = loop.buffer; s.loop = true;
+                    s.detune.value = baseCents + spread * 11 + (Math.random() - 0.5) * 4;  // ensemble detune
+                    lfoDepth.connect(s.detune);
+                    const g = ctx.createGain(); g.gain.value = 0.9 / Math.sqrt(size);
+                    let node = s;
+                    if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = spread * 0.7; s.connect(g); g.connect(p); p.connect(setGain); }
+                    else { s.connect(g); g.connect(setGain); }
+                    s.start(atTime, Math.random() * (loop.buffer.duration * 0.5));         // decorrelated loop phase
+                    srcs.push(s);
+                }
+                // equal-power-ish crossfade in; fade previous out
+                const fade = glide && glide > 0 ? Math.min(0.12, glide) : 0.05;
+                setGain.gain.setValueAtTime(0, atTime);
+                setGain.gain.linearRampToValueAtTime(1, atTime + fade);
+                if (prevSet) {
+                    prevSet.node.gain.cancelScheduledValues(atTime);
+                    prevSet.node.gain.setValueAtTime(prevSet.node.gain.value, atTime);
+                    prevSet.node.gain.linearRampToValueAtTime(0, atTime + fade);
+                    const dead = prevSet; setTimeout(() => { dead.srcs.forEach((s) => { try { s.stop(); } catch (e) {} }); try { dead.node.disconnect(); } catch (e) {} }, (fade + 0.05) * 1000 + 30);
+                }
+                return { node: setGain, srcs, key: loop.part + '_' + loop.midi + '_' + vowelName2 };
+            }
+
+            function retarget(vowelName2, hz, t, glide) {
+                const loop = pickLoop(vowelName2, hz);
+                const newKey = loop ? loop.part + '_' + loop.midi + '_' + vowelName2 : null;
+                if (current && newKey === current.key) {
+                    // same loop: just glide the detune of the live ensemble
+                    const baseCents = 1200 * Math.log2(hz / loop.hz) + detuneCents;
+                    current.srcs.forEach((s, i) => {
+                        const spread = size > 1 ? (i / (size - 1) - 0.5) : 0;
+                        const target = baseCents + spread * 11;
+                        s.detune.cancelScheduledValues(t);
+                        s.detune.setValueAtTime(s.detune.value, t);
+                        if (glide && glide > 0) s.detune.linearRampToValueAtTime(target, t + glide);
+                        else s.detune.setValueAtTime(target, t);
+                    });
+                } else {
+                    current = spawn(vowelName2, hz, t, glide, current) || current;
+                }
+                curVowel = vowelName2; curHz = hz;
+            }
+
+            return {
+                technique, output: out,
+                setFrequency(f, t, glide) { retarget(curVowel, f, t, glide); },
+                setLevel(v, t) { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(out.gain.value, t); out.gain.linearRampToValueAtTime(v, t + 0.02); },
+                setVowel(name2, t) { if (name2 !== curVowel) retarget(name2, curHz, t, 0.06); },
+                dispose() { try { lfo.stop(); } catch (e) {} if (current) current.srcs.forEach((s) => { try { s.stop(); } catch (e) {} }); try { out.disconnect(); } catch (e) {} }
             };
         }
 
@@ -440,6 +572,7 @@
 
     // Ordered earliest → most modern, so the explorer walks history left-to-right.
     const TECHNIQUES = [
+        { id: 'sampler',  name: 'Sampled voice',   blurb: 'Real recorded sung vowels (VocalSet), looped and pitch-mapped with formant preservation — the most realistic voice.' },
         { id: 'vocoder',  name: 'Channel vocoder', blurb: 'Buzz + hiss split through a band-pass bank gated by the vowel envelope — Dudley\'s VODER (1939).' },
         { id: 'formant',  name: 'Formant filter',  blurb: 'A glottal-pulse oscillator through parallel resonant band-pass formants (source–filter, PAT/OVE).' },
         { id: 'klatt',    name: 'Klatt cascade',   blurb: 'A voicing source + aspiration through a cascade of formant resonators — KLSYN / DECtalk (1980).' },
@@ -450,5 +583,6 @@
         { id: 'ddsp',     name: 'DDSP harmonic+noise', blurb: 'A harmonic oscillator bank summed with formant-shaped filtered noise — the neural bridge (2020).' }
     ];
 
-    global.VocalVoices = { init, hasWorklets, create, VOWELS, TRACT_VOWELS, TECHNIQUES };
+    const api = { init, hasWorklets, hasSamples, loadSamples, create, VOWELS, TRACT_VOWELS, TECHNIQUES, sampleBase: null };
+    global.VocalVoices = api;
 })(typeof self !== 'undefined' ? self : this);

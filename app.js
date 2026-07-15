@@ -12,6 +12,12 @@
 
 // ── Per-technique history (name / era / description / key names & dates) ─────
 const TECH_INFO = {
+    sampler: {
+        title: 'Sampled Voice (real recordings)',
+        era: 'concatenative · PSOLA lineage, 1986→',
+        who: 'VocalSet (Wilkins, Seetharaman, Wahl & Pardo, 2018)',
+        body: 'The most realistic voice here — and the one that leaves synthesis behind. It plays actual recorded sung vowels from the VocalSet corpus, looped seamlessly and mapped across pitch with formant-preserving pitch-shifting (TD-PSOLA, the Charpentier–Moulines idea) so the vocal-tract resonances stay put as the note moves — no "chipmunk". A small detuned, panned ensemble with gentle vibrato gives a choral width. This is the sample-and-pitch-shift path that VOCALOID and modern singing synths are built on.'
+    },
     vocoder: {
         title: 'Channel Vocoder / VODER',
         era: '1938–1939 · Bell Labs',
@@ -76,9 +82,9 @@ class VocalExplorer {
         this.isPlaying = false;
         this.analyser = null;
         this.voice = null;
-        this.technique = 'fof';
+        this.technique = 'sampler';
         this.vowel = 'a';
-        this.pitch = 196.0;          // G3
+        this.pitch = 261.63;         // C4
         this.mode = 'sustain';       // 'sustain' | 'phrase'
         this.phraseTimer = null;
         this.phraseStep = 0;
