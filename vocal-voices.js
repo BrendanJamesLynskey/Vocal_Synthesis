@@ -362,9 +362,22 @@
             return {
                 technique, output: out,
                 setFrequency(f, t, glide) { retarget(curVowel, f, t, glide); },
-                setLevel(v, t) { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(out.gain.value, t); out.gain.linearRampToValueAtTime(v, t + 0.02); },
+                // fast-ish attack, slow smooth release: samples cut dead on a 20ms gate close
+                setLevel(v, t) {
+                    const g = out.gain;
+                    g.cancelScheduledValues(t); g.setValueAtTime(g.value, t);
+                    if (v >= g.value) g.linearRampToValueAtTime(v, t + 0.03);   // rising: crisp onset
+                    else g.setTargetAtTime(v, t, 0.06);                          // falling: ~180ms natural decay
+                },
                 setVowel(name2, t) { if (name2 !== curVowel) retarget(name2, curHz, t, 0.06); },
-                dispose() { try { lfo.stop(); } catch (e) {} if (current) current.srcs.forEach((s) => { try { s.stop(); } catch (e) {} }); try { out.disconnect(); } catch (e) {} }
+                dispose() {
+                    // fade the gate before stopping sources so teardown never clicks
+                    const t = ctx.currentTime, fade = 0.2;
+                    try { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(out.gain.value, t); out.gain.linearRampToValueAtTime(0, t + fade); } catch (e) {}
+                    try { lfo.stop(t + fade + 0.05); } catch (e) {}
+                    if (current) current.srcs.forEach((s) => { try { s.stop(t + fade + 0.05); } catch (e) {} });
+                    setTimeout(() => { try { out.disconnect(); } catch (e) {} }, (fade + 0.1) * 1000);
+                }
             };
         }
 

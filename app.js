@@ -158,14 +158,15 @@ class VocalExplorer {
 
     end() {
         this._stopPhrase();
+        const t = this.ctx ? this.ctx.currentTime : 0;
+        if (this.voice) { try { this.voice.setLevel(0, t); } catch (e) {} }   // start the voice's own smooth release
         if (this.ctx && this.voiceBus) {
-            const t = this.ctx.currentTime;
             this.voiceBus.gain.cancelScheduledValues(t);
             this.voiceBus.gain.setValueAtTime(this.voiceBus.gain.value, t);
-            this.voiceBus.gain.linearRampToValueAtTime(0, t + 0.12);
+            this.voiceBus.gain.linearRampToValueAtTime(0, t + 0.35);          // gentler stop (was 0.12)
         }
         const old = this.voice; this.voice = null;
-        setTimeout(() => { if (old) { try { old.setLevel(0, this.ctx.currentTime); old.dispose(); } catch (e) {} } }, 200);
+        setTimeout(() => { if (old) { try { old.dispose(); } catch (e) {} } }, 450);
         this.isPlaying = false;
     }
 
