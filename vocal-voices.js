@@ -401,75 +401,64 @@
                 return bank.map[best.key];
             }
 
-            let current = null, curVowel = vowelName, curHz = 200;
+            // ── Granular sustain ────────────────────────────────────────────
+            // Rather than LOOP the short source buffer (which repeats audibly
+            // under a long held note), spray overlapping grains read from RANDOM
+            // positions of the vowel sample, each with its own pitch, amplitude
+            // and pan jitter. Random positions ⇒ the sustain never repeats; the
+            // per-grain jitter gives it a living, breathing quality. A lightweight
+            // lookahead scheduler keeps grains flowing while the voice exists.
+            let curVowel = vowelName, curLoop = pickLoop(curVowel, 200);
+            // pitch-ramp state so setFrequency can glide smoothly between grains
+            let hzFrom = 200, hzTo = 200, rampT0 = 0, rampDur = 0;
+            function hzAt(t) {
+                if (rampDur <= 0 || t >= rampT0 + rampDur) return hzTo;
+                if (t <= rampT0) return hzFrom;
+                return hzFrom * Math.pow(hzTo / hzFrom, (t - rampT0) / rampDur);   // cents-linear glide
+            }
+            const GDUR_MIN = 0.12, GDUR_MAX = 0.18, OVERLAP = 4.2;   // high overlap ⇒ smooth (steady) amplitude
+            const panSpread = size > 1 ? 0.6 : 0.35;
+            const activeGrains = new Set();
+            let nextGrainAt = 0, alive = true;
 
-            function spawn(vowelName2, hz, atTime, glide, prevSet) {
-                const loop = pickLoop(vowelName2, hz);
-                if (!loop) return null;
-                const setGain = ctx.createGain(); setGain.gain.value = 0; setGain.connect(out);
-                const baseCents = 1200 * Math.log2(hz / loop.hz) + detuneCents;
-                const srcs = [], mods = [];
-                // Give a modulation param its own slow, aperiodic drift (from the
-                // shared random-walk buffer, read at a random rate/phase) so this
-                // layer's loop never repeats identically. Returns the source so it
-                // can be stopped on respawn/dispose (else it leaks & keeps drifting).
-                function addDrift(param, depth) {
-                    const nz = ctx.createBufferSource(); nz.buffer = getDrift(ctx); nz.loop = true;
-                    nz.playbackRate.value = 0.6 + Math.random() * 0.8;     // each layer drifts at its own slow rate
-                    const dg = ctx.createGain(); dg.gain.value = depth;
-                    nz.connect(dg); dg.connect(param);
-                    nz.start(atTime, Math.random() * 18);                  // random phase into the 20 s walk
-                    mods.push(nz);
-                }
-                for (let i = 0; i < size; i++) {
-                    const spread = size > 1 ? (i / (size - 1) - 0.5) : 0;   // -0.5..0.5
-                    const s = ctx.createBufferSource(); s.buffer = loop.buffer; s.loop = true;
-                    s.detune.value = baseCents + spread * 11 + (Math.random() - 0.5) * 4;  // ensemble detune
-                    lfoDepth.connect(s.detune);
-                    const g = ctx.createGain(); g.gain.value = 0.9 / Math.sqrt(size);
-                    let node = s;
-                    if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = spread * 0.7; s.connect(g); g.connect(p); p.connect(setGain); }
-                    else { s.connect(g); g.connect(setGain); }
-                    s.start(atTime, Math.random() * (loop.buffer.duration * 0.5));         // decorrelated loop phase
-                    // anti-repetition: a few cents of aperiodic pitch drift + a few
-                    // percent of amplitude shimmer, independent per layer, so a short
-                    // loop under a long note stops sounding like stitched copies.
-                    addDrift(s.detune, 7.5);
-                    addDrift(g.gain, 0.06 / Math.sqrt(size));
-                    srcs.push(s);
-                }
-                // equal-power-ish crossfade in; fade previous out
-                const fade = glide && glide > 0 ? Math.min(0.12, glide) : 0.05;
-                setGain.gain.setValueAtTime(0, atTime);
-                setGain.gain.linearRampToValueAtTime(1, atTime + fade);
-                if (prevSet) {
-                    prevSet.node.gain.cancelScheduledValues(atTime);
-                    prevSet.node.gain.setValueAtTime(prevSet.node.gain.value, atTime);
-                    prevSet.node.gain.linearRampToValueAtTime(0, atTime + fade);
-                    const dead = prevSet; setTimeout(() => { dead.srcs.forEach((s) => { try { s.stop(); } catch (e) {} }); (dead.mods || []).forEach((s) => { try { s.stop(); } catch (e) {} }); try { dead.node.disconnect(); } catch (e) {} }, (fade + 0.05) * 1000 + 30);
-                }
-                return { node: setGain, srcs, mods, key: loop.part + '_' + loop.midi + '_' + vowelName2 };
+            function spawnGrain(at) {
+                const loop = curLoop; if (!loop || !loop.buffer) return;
+                const gdur = GDUR_MIN + Math.random() * (GDUR_MAX - GDUR_MIN);
+                const hz = hzAt(at + gdur * 0.5);
+                const cents = 1200 * Math.log2(hz / loop.hz) + detuneCents + (Math.random() - 0.5) * 9; // per-grain pitch jitter
+                const rate = Math.pow(2, cents / 1200);
+                const src = ctx.createBufferSource(); src.buffer = loop.buffer; src.loop = false;
+                src.detune.value = cents;
+                lfoDepth.connect(src.detune);                            // musical vibrato carries across grains
+                const g = ctx.createGain(); g.gain.value = 0;
+                const amp = (0.85 + Math.random() * 0.3) / Math.sqrt(OVERLAP);   // mild per-grain amplitude jitter
+                // raised-cosine (triangular) window — click-free overlap-add
+                g.gain.setValueAtTime(0, at);
+                g.gain.linearRampToValueAtTime(amp, at + gdur * 0.5);
+                g.gain.linearRampToValueAtTime(0, at + gdur);
+                const need = gdur * rate;                                 // buffer-seconds consumed at this rate
+                const maxOff = Math.max(0, loop.buffer.duration - need - 0.005);
+                const off = Math.random() * maxOff;                      // RANDOM read position ⇒ no periodicity
+                if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = (Math.random() - 0.5) * panSpread; src.connect(g); g.connect(p); p.connect(out); }
+                else { src.connect(g); g.connect(out); }
+                try { src.start(at, off, need + 0.02); } catch (e) { return; }
+                activeGrains.add(src);
+                src.onended = () => { activeGrains.delete(src); try { src.disconnect(); } catch (e) {} };
             }
 
-            function retarget(vowelName2, hz, t, glide) {
-                const loop = pickLoop(vowelName2, hz);
-                const newKey = loop ? loop.part + '_' + loop.midi + '_' + vowelName2 : null;
-                if (current && newKey === current.key) {
-                    // same loop: just glide the detune of the live ensemble
-                    const baseCents = 1200 * Math.log2(hz / loop.hz) + detuneCents;
-                    current.srcs.forEach((s, i) => {
-                        const spread = size > 1 ? (i / (size - 1) - 0.5) : 0;
-                        const target = baseCents + spread * 11;
-                        s.detune.cancelScheduledValues(t);
-                        s.detune.setValueAtTime(s.detune.value, t);
-                        if (glide && glide > 0) s.detune.linearRampToValueAtTime(target, t + glide);
-                        else s.detune.setValueAtTime(target, t);
-                    });
-                } else {
-                    current = spawn(vowelName2, hz, t, glide, current) || current;
+            // Lookahead scheduler: keep ~140 ms of grains queued on the audio clock.
+            function tick() {
+                if (!alive) return;
+                const ahead = ctx.currentTime + 0.14;
+                if (nextGrainAt < ctx.currentTime) nextGrainAt = ctx.currentTime;
+                let guard = 0;
+                while (nextGrainAt < ahead && guard++ < 64) {
+                    spawnGrain(nextGrainAt);
+                    nextGrainAt += (GDUR_MIN + Math.random() * (GDUR_MAX - GDUR_MIN)) / OVERLAP;   // hop = grain / overlap
                 }
-                curVowel = vowelName2; curHz = hz;
             }
+            const grainTimer = (typeof setInterval === 'function') ? setInterval(tick, 60) : null;
+            tick();
 
             // Play one procedural consonant into the ungated consonant bus.
             // Fricatives/stops = band-passed noise; nasals/liquids = a brief
@@ -528,22 +517,28 @@
 
             return {
                 technique, output: voiceOut, articulate,
-                setFrequency(f, t, glide) { retarget(curVowel, f, t, glide); },
-                // fast-ish attack, slow smooth release: samples cut dead on a 20ms gate close
+                setFrequency(f, t, glide) {
+                    const now = ctx.currentTime, t0 = (t && t > now) ? t : now;
+                    hzFrom = hzAt(t0); hzTo = f; rampT0 = t0; rampDur = (glide && glide > 0) ? glide : 0;
+                    // re-pick the nearest-pitch sample so the grains stay formant-accurate
+                    curLoop = pickLoop(curVowel, f) || curLoop;
+                },
+                // fast-ish attack, slow smooth release on the vowel gate
                 setLevel(v, t) {
                     const g = out.gain;
                     g.cancelScheduledValues(t); g.setValueAtTime(g.value, t);
                     if (v >= g.value) g.linearRampToValueAtTime(v, t + 0.03);   // rising: crisp onset
                     else g.setTargetAtTime(v, t, 0.06);                          // falling: ~180ms natural decay
                 },
-                setVowel(name2, t) { if (name2 !== curVowel) retarget(name2, curHz, t, 0.06); },
+                setVowel(name2, t) { if (name2 !== curVowel) { curVowel = name2; curLoop = pickLoop(name2, hzTo) || curLoop; } },
                 dispose() {
-                    // fade the gate before stopping sources so teardown never clicks
+                    alive = false; try { if (grainTimer) clearInterval(grainTimer); } catch (e) {}
+                    // fade the gate before stopping grains so teardown never clicks
                     const t = ctx.currentTime, fade = 0.2;
                     try { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(out.gain.value, t); out.gain.linearRampToValueAtTime(0, t + fade); } catch (e) {}
                     try { lfo.stop(t + fade + 0.05); } catch (e) {}
-                    if (current) { current.srcs.forEach((s) => { try { s.stop(t + fade + 0.05); } catch (e) {} }); (current.mods || []).forEach((s) => { try { s.stop(t + fade + 0.05); } catch (e) {} }); }
-                    setTimeout(() => { try { out.disconnect(); } catch (e) {} try { consBus.disconnect(); } catch (e) {} try { voiceOut.disconnect(); } catch (e) {} }, (fade + 0.1) * 1000);
+                    activeGrains.forEach((s) => { try { s.stop(t + fade + 0.12); } catch (e) {} });
+                    setTimeout(() => { try { out.disconnect(); } catch (e) {} try { consBus.disconnect(); } catch (e) {} try { voiceOut.disconnect(); } catch (e) {} }, (fade + 0.25) * 1000);
                 }
             };
         }
