@@ -585,12 +585,10 @@ main { padding-left: 1rem; padding-right: 1rem; }
         for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
         ctx.__vocalNoise = buf; return buf;
     }
-    // A slow, smooth random-walk control signal in [-1,1] (20 s, looped). Used
-    // to give each looped-sample layer its own aperiodic pitch/amplitude drift,
-    // so a short loop repeated under a long held note never reads as identical
-    // stitched copies — the seam and spectral repeat are smeared into a living,
-    // breathing sustain. One buffer per context; each layer reads it at a random
-    // rate and phase, so layers stay decorrelated.
+    // A slow, smooth random-walk control signal in [-1,1] (20 s, looped). The
+    // sampler engine plays it into a shared sub-cent detune input so a held
+    // note breathes slightly — alive but never detuned against itself. One
+    // buffer per context; each voice reads it at its own random rate.
     function getDrift(ctx) {
         if (ctx.__vocalDrift) return ctx.__vocalDrift;
         const n = Math.floor(ctx.sampleRate * 20), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
@@ -753,15 +751,15 @@ main { padding-left: 1rem; padding-right: 1rem; }
         }
 
         // ── Sampled real voice (VocalSet vowels, formant-preserving pitch grid) ──
-        // The most realistic engine: it plays actual recorded sung vowels, looped
-        // seamlessly, choosing the nearest pitch in the sample grid and detuning it
-        // by only a few semitones (so the vocal-tract formants stay put — no
-        // "chipmunk"). A small detuned/panned ensemble gives a choral width, and a
-        // gentle vibrato LFO rides each voice's detune.
+        // The most realistic engine: it plays actual recorded sung vowels,
+        // choosing the nearest pitch in the sample grid and detuning it by at
+        // most a semitone or so (so the vocal-tract formants stay put — no
+        // "chipmunk"). Long notes are sustained by phase-coherent splicing of
+        // the short recording (see below), and one shared vibrato LFO rides
+        // every layer's detune so the note always stays a single pitch.
         if (technique === 'sampler' && hasSamples(ctx)) {
             const bank = ctx.__vocalSamples;
             const voicePref = opts.voice || 'auto';           // 'auto' | 'male' | 'female'
-            const size = opts.ensemble != null ? opts.ensemble : 3;
             const vibDepthCents = opts.vibCents != null ? opts.vibCents : (vibDepth * 1200); // reuse vibDepth (ratio) → cents
             const vibRate = opts.vibRate != null ? opts.vibRate : (4.6 + Math.random() * 1.2);
 
@@ -790,64 +788,317 @@ main { padding-left: 1rem; padding-right: 1rem; }
                 return bank.map[best.key];
             }
 
-            // ── Granular sustain ────────────────────────────────────────────
-            // Rather than LOOP the short source buffer (which repeats audibly
-            // under a long held note), spray overlapping grains read from RANDOM
-            // positions of the vowel sample, each with its own pitch, amplitude
-            // and pan jitter. Random positions ⇒ the sustain never repeats; the
-            // per-grain jitter gives it a living, breathing quality. A lightweight
-            // lookahead scheduler keeps grains flowing while the voice exists.
+            // ── Phase-coherent splice sustain ───────────────────────────────
+            // A long note is built from SEGMENTS of the vowel sample spliced
+            // end-to-end with short crossfades. Between splices the recording
+            // plays back verbatim — perfectly natural and perfectly in tune. At
+            // each splice the read position jumps to a RANDOM point, but that
+            // point is quantised to a whole number of pitch periods and matched
+            // to a global phase accumulator, so the outgoing and incoming
+            // segments are IN PHASE while they overlap: they reinforce instead
+            // of beating or comb-filtering (the failure mode of jittered
+            // granular). Segment lengths are randomised so splices never fall
+            // on a fixed grid — the sustain never repeats, yet stays one clean
+            // pitch. ALL pitch modulation (portamento, vibrato, sub-cent drift)
+            // is shared by every live segment through common AudioParam inputs,
+            // so simultaneous layers can never sound at different pitches.
             let curVowel = vowelName, curLoop = pickLoop(curVowel, 200);
-            // pitch-ramp state so setFrequency can glide smoothly between grains
+            // pitch-ramp state so setFrequency can glide smoothly across splices
             let hzFrom = 200, hzTo = 200, rampT0 = 0, rampDur = 0;
             function hzAt(t) {
                 if (rampDur <= 0 || t >= rampT0 + rampDur) return hzTo;
                 if (t <= rampT0) return hzFrom;
                 return hzFrom * Math.pow(hzTo / hzFrom, (t - rampT0) / rampDur);   // cents-linear glide
             }
-            const GDUR_MIN = 0.12, GDUR_MAX = 0.18, OVERLAP = 4.2;   // high overlap ⇒ smooth (steady) amplitude
-            const panSpread = size > 1 ? 0.6 : 0.35;
-            const activeGrains = new Set();
-            let nextGrainAt = 0, alive = true;
+            // ∫ hzAt dt over [a,b] — exact for the cents-linear (exponential) ramp.
+            function cyclesBetween(a, b) {
+                if (b <= a) return 0;
+                if (rampDur <= 0) return (b - a) * hzTo;
+                const t1 = rampT0, t2 = rampT0 + rampDur;
+                let s = 0;
+                if (a < t1) s += (Math.min(b, t1) - a) * hzFrom;
+                const ra = Math.max(a, t1), rb = Math.min(b, t2);
+                if (rb > ra) {
+                    const fa = hzAt(ra), fb = hzAt(rb);
+                    s += Math.abs(fb - fa) < 1e-9 ? fa * (rb - ra) : (fb - fa) * (rb - ra) / Math.log(fb / fa);
+                }
+                if (b > t2) s += (b - Math.max(a, t2)) * hzTo;
+                return s;
+            }
+            let phC = 0, phT = 0;                       // global phase: cycles elapsed at the target pitch
+            function phaseAt(t) { return t >= phT ? phC + cyclesBetween(phT, t) * detuneFactor : phC - cyclesBetween(t, phT) * detuneFactor; }
 
-            function spawnGrain(at) {
-                const loop = curLoop; if (!loop || !loop.buffer) return;
-                const gdur = GDUR_MIN + Math.random() * (GDUR_MAX - GDUR_MIN);
-                const hz = hzAt(at + gdur * 0.5);
-                const cents = 1200 * Math.log2(hz / loop.hz) + detuneCents + (Math.random() - 0.5) * 9; // per-grain pitch jitter
-                const rate = Math.pow(2, cents / 1200);
-                const src = ctx.createBufferSource(); src.buffer = loop.buffer; src.loop = false;
-                src.detune.value = cents;
-                lfoDepth.connect(src.detune);                            // musical vibrato carries across grains
-                const g = ctx.createGain(); g.gain.value = 0;
-                const amp = (0.85 + Math.random() * 0.3) / Math.sqrt(OVERLAP);   // mild per-grain amplitude jitter
-                // raised-cosine (triangular) window — click-free overlap-add
-                g.gain.setValueAtTime(0, at);
-                g.gain.linearRampToValueAtTime(amp, at + gdur * 0.5);
-                g.gain.linearRampToValueAtTime(0, at + gdur);
-                const need = gdur * rate;                                 // buffer-seconds consumed at this rate
-                const maxOff = Math.max(0, loop.buffer.duration - need - 0.005);
-                const off = Math.random() * maxOff;                      // RANDOM read position ⇒ no periodicity
-                if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = (Math.random() - 0.5) * panSpread; src.connect(g); g.connect(p); p.connect(out); }
-                else { src.connect(g); g.connect(out); }
-                try { src.start(at, off, need + 0.02); } catch (e) { return; }
-                activeGrains.add(src);
-                src.onended = () => { activeGrains.delete(src); try { src.disconnect(); } catch (e) {} };
+            // Shared target pitch in cents (re REF_HZ). Every segment's detune
+            // listens to this ONE node, so portamento moves all layers together.
+            const REF_HZ = 440;
+            const pitchCents = ctx.createConstantSource();
+            pitchCents.offset.value = 1200 * Math.log2(hzTo / REF_HZ);
+            pitchCents.start();
+            // Slow SUB-CENT random drift — also shared, so it adds life without
+            // ever splitting the note into different simultaneous pitches.
+            const driftSrc = ctx.createBufferSource(); driftSrc.buffer = getDrift(ctx); driftSrc.loop = true;
+            driftSrc.playbackRate.value = 0.85 + Math.random() * 0.3;
+            const driftGain = ctx.createGain(); driftGain.gain.value = 0.6;   // ±0.6 cents
+            driftSrc.connect(driftGain); driftSrc.start();
+
+            // Measure each loop ONCE (lazily, cached on the loop object): a 10 ms
+            // pitch track by normalized autocorrelation, its median pitch, and a
+            // cumulative-phase map. Real VocalSet takes are NOT dead steady — a
+            // few are >100 cents off their grid label and most carry the
+            // singer's own vibrato — so per-segment detune curves FLATTEN the
+            // measured track to the target pitch (formants untouched: the
+            // correction is only ever a few % of playback rate), and splice
+            // offsets are phase-quantised through the map, not a fixed period.
+            function pitchMap(loop) {
+                if (loop.__pm) return loop.__pm;
+                const d = loop.buffer.getChannelData(0), sr = loop.buffer.sampleRate;
+                const hop = Math.max(1, Math.floor(sr * 0.01)), win = Math.floor(sr * 0.04);
+                const lo = Math.max(2, Math.floor(sr / (loop.hz * 1.21))), hi = Math.min(Math.floor(sr / (loop.hz * 0.83)), Math.floor(d.length / 3));
+                // 10 ms RMS bins: quiet pockets (glottal gaps, creak, edits) break
+                // the phase model invisibly — frames touching one are excluded
+                const nb = Math.max(1, Math.floor(d.length / hop)), bins = new Float64Array(nb);
+                for (let j = 0; j < nb; j++) {
+                    let e = 0; const a0 = j * hop, b0 = Math.min(d.length, a0 + hop);
+                    for (let i = a0; i < b0; i++) e += d[i] * d[i];
+                    bins[j] = Math.sqrt(e / (b0 - a0));
+                }
+                const bSorted = Array.from(bins).sort((p, q) => p - q), bMed = bSorted[Math.floor(nb / 2)] || 1e-6;
+                const hzs = [], clar = [], quiet = [];
+                for (let s = 0; s + win + hi < d.length; s += hop) {
+                    let bl = lo, bv = -2; const vals = new Float64Array(hi - lo + 1);
+                    for (let L = lo; L <= hi; L++) {
+                        let num = 0, e1 = 0, e2 = 0;
+                        for (let i = s; i < s + win; i++) { const p = d[i], q = d[i + L]; num += p * q; e1 += p * p; e2 += q * q; }
+                        const v = num / Math.sqrt(e1 * e2 + 1e-20); vals[L - lo] = v;
+                        if (v > bv) { bv = v; bl = L; }
+                    }
+                    let lag = bl;
+                    if (bl > lo && bl < hi) {   // parabolic sub-sample refinement
+                        const y1 = vals[bl - 1 - lo], y2 = vals[bl - lo], y3 = vals[bl + 1 - lo], den = y1 - 2 * y2 + y3;
+                        if (Math.abs(den) > 1e-12) lag = bl + 0.5 * (y1 - y3) / den;
+                    }
+                    hzs.push(sr / lag); clar.push(bv);
+                    let qm = Infinity;
+                    for (let j = Math.floor(s / hop); j <= Math.min(nb - 1, Math.floor((s + win) / hop)); j++) if (bins[j] < qm) qm = bins[j];
+                    quiet.push(qm < 0.72 * bMed);
+                }
+                if (!hzs.length) { hzs.push(loop.hz); clar.push(1); quiet.push(false); }
+                // 3-point median filter kills single-frame estimator glitches
+                const sm = hzs.map((v, i) => {
+                    const p = hzs[Math.max(0, i - 1)], q = v, r = hzs[Math.min(hzs.length - 1, i + 1)];
+                    return Math.max(Math.min(p, q), Math.min(Math.max(p, q), r));
+                });
+                // median pitch from RELIABLE frames only (strong periodicity)
+                let rel = sm.filter((v, k) => clar[k] >= 0.72);
+                if (!rel.length) rel = sm;
+                const sorted = rel.slice().sort((p, q) => p - q), hzMed = sorted[Math.floor(sorted.length / 2)];
+                // frames with weak periodicity or absurd deviation are UNRELIABLE
+                // (breathy onsets, creak): bridge them by interpolation so the
+                // flatten curve never chases estimator noise…
+                const bad = sm.map((v, k) => quiet[k] || clar[k] < 0.72 || Math.abs(1200 * Math.log2(v / hzMed)) > 250);
+                for (let k = 0; k < sm.length; k++) {
+                    if (!bad[k]) continue;
+                    let p = k - 1; while (p >= 0 && bad[p]) p--;
+                    let q = k + 1; while (q < sm.length && bad[q]) q++;
+                    const va = p >= 0 ? sm[p] : (q < sm.length ? sm[q] : hzMed);
+                    const vb = q < sm.length ? sm[q] : va;
+                    sm[k] = va * Math.pow(vb / va, q > p ? (k - p) / (q - p) : 0);
+                }
+                const cT0 = (win / 2) / sr, hopSec = hop / sr;
+                // …and keep splices out of the unreliable span entirely
+                let g0 = 0; while (g0 < bad.length && bad[g0]) g0++;
+                let g1 = bad.length - 1; while (g1 >= 0 && bad[g1]) g1--;
+                const minOff = g0 > 0 && g0 < bad.length ? cT0 + g0 * hopSec : 0;
+                const maxPos = g1 >= 0 && g1 < bad.length - 1 ? cT0 + g1 * hopSec + hopSec : loop.buffer.duration;
+                const hzAtPos = (t) => {
+                    const u = (t - cT0) / hopSec, i = Math.max(0, Math.min(sm.length - 1, Math.floor(u)));
+                    const j = Math.min(sm.length - 1, i + 1), fr = Math.max(0, Math.min(1, u - i));
+                    return sm[i] * (1 - fr) + sm[j] * fr;
+                };
+                // cumulative phase (cycles) at 1 ms resolution over the buffer
+                const step = 0.001, nSt = Math.ceil(loop.buffer.duration / step) + 2;
+                const phi = new Float64Array(nSt);
+                for (let k = 1; k < nSt; k++) phi[k] = phi[k - 1] + hzAtPos((k - 0.5) * step) * step;
+                const phiAtPos = (t) => {
+                    const u = Math.max(0, t / step), i = Math.min(nSt - 2, Math.floor(u));
+                    return phi[i] + (phi[i + 1] - phi[i]) * (u - i);
+                };
+                loop.__pm = { hzMed, hzMin: Math.min.apply(null, sm), hzAtPos, phiAtPos, minOff, maxPos };
+                return loop.__pm;
+            }
+            // 10 ms RMS profile of a loop (cached), for per-segment loudness
+            // equalisation — keeps the sustain's amplitude steady wherever the
+            // splice lands in the recording.
+            function rmsProfile(loop) {
+                if (loop.__rms) return loop.__rms;
+                const d = loop.buffer.getChannelData(0), sr = loop.buffer.sampleRate, w = Math.max(1, Math.floor(sr * 0.01));
+                const n = Math.max(1, Math.floor(d.length / w)), arr = new Float32Array(n);
+                let total = 0;
+                for (let k = 0; k < n; k++) {
+                    let s = 0; const a0 = k * w, b0 = Math.min(d.length, a0 + w);
+                    for (let i = a0; i < b0; i++) s += d[i] * d[i];
+                    arr[k] = Math.sqrt(s / (b0 - a0)); total += arr[k];
+                }
+                loop.__rms = { arr, win: w / sr, mean: total / n }; return loop.__rms;
+            }
+            function rmsAt(loop, t) {
+                const p = rmsProfile(loop), u = t / p.win, i = Math.max(0, Math.min(p.arr.length - 1, Math.floor(u)));
+                const j = Math.min(p.arr.length - 1, i + 1), fr = Math.max(0, Math.min(1, u - i));
+                return p.arr[i] * (1 - fr) + p.arr[j] * fr;
             }
 
-            // Lookahead scheduler: keep ~140 ms of grains queued on the audio clock.
+            const XFADE = 0.09, SEG_MIN = 0.16, SEG_MAX = 0.34;   // splice crossfade / segment-length bounds (s)
+            const segs = new Set();
+            let nextAt = 0, alive = true, lastSeg = null;         // lastSeg: the most recently started segment
+
+            // Where (in buffer seconds) is a flattened segment's read head after
+            // `cyc` output cycles? Inverts the cumulative-phase map by Newton.
+            function posAfter(pm, off, cyc) {
+                let p = off + cyc / pm.hzMed;
+                for (let it = 0; it < 3; it++) p += (pm.phiAtPos(off) + cyc - pm.phiAtPos(p)) / pm.hzAtPos(p);
+                return p;
+            }
+            // Fine-align a candidate splice offset by cross-correlating the raw
+            // waveform against what the OUTGOING segment is playing at t0 — this
+            // is exact where the phase map is only approximate, so crossfading
+            // segments genuinely reinforce (no mid-splice level dip or comb).
+            function alignOffset(oldLoop, posOut, newLoop, cand, f) {
+                try {
+                    const dOld = oldLoop.buffer.getChannelData(0), dNew = newLoop.buffer.getChannelData(0);
+                    const sr = newLoop.buffer.sampleRate;
+                    const per = Math.max(8, Math.floor(sr / pitchMap(newLoop).hzMed));
+                    const W = Math.min(per * 4, Math.floor(sr * 0.05));   // ~the crossfade's span
+                    const half = Math.floor(per * 1.2);                   // ≥ a full period: a true peak is always in range
+                    const i0 = Math.floor(posOut * sr), j0 = Math.floor(cand * sr);
+                    if (i0 < 0 || i0 + W >= dOld.length) return { off: cand, v: 0 };
+                    const lo = Math.max(-half, -j0), hi = Math.min(half, dNew.length - W - j0 - 1);
+                    if (hi <= lo) return { off: cand, v: 0 };
+                    let bestD = 0, bestV = -2, e1 = 0;
+                    for (let k = 0; k < W; k++) e1 += dOld[i0 + k] * dOld[i0 + k];
+                    for (let dlt = lo; dlt <= hi; dlt++) {
+                        let num = 0, e2 = 0;
+                        for (let k = 0; k < W; k++) { const p = dOld[i0 + k], q = dNew[j0 + dlt + k]; num += p * q; e2 += q * q; }
+                        const v = num / Math.sqrt(e2 + 1e-12);
+                        if (v > bestV) { bestV = v; bestD = dlt; }
+                    }
+                    return { off: cand + bestD / sr, v: bestV / Math.sqrt(e1 + 1e-12) };
+                } catch (e) { return { off: cand, v: 0 }; }
+            }
+
+            // Start one segment at audio-clock time t0; returns its full-level
+            // duration so the scheduler knows when the next splice is due.
+            function startSegment(t0) {
+                const loop = curLoop; if (!loop || !loop.buffer) return SEG_MIN;
+                const pm = pitchMap(loop), prof = rmsProfile(loop);
+                if (t0 > phT) { phC = phaseAt(t0); phT = t0; }
+                const ph = phaseAt(t0);
+                const f = hzAt(t0) * detuneFactor;
+                const rate0 = f / pm.hzMed, rateMax = f / pm.hzMin;
+                const dur = loop.buffer.duration, margin = 0.015;
+                const needMin = (SEG_MIN + 2 * XFADE) * rateMax * 1.02 + margin;
+                // stay inside the loop's RELIABLE pitch-tracked span
+                const useEnd = Math.min(dur, pm.maxPos + 0.02);
+                const useStart = Math.min(pm.minOff, Math.max(0, useEnd - needMin - 0.02));
+                const maxOff = Math.max(useStart, useEnd - needMin);
+                // random read position, then nudged (< one period) so the
+                // recording's cumulative phase there matches the global phase
+                const frac = ph - Math.floor(ph);
+                // leave ~2.5 periods of headroom so the phase nudge and waveform
+                // alignment below never push the offset past maxOff (a hard clamp
+                // there would undo the alignment and dip the crossfade)
+                let off = useStart + Math.random() * Math.max(0, maxOff - 2.5 / pm.hzMed - useStart);
+                for (let it = 0; it < 2; it++) {
+                    const p0 = pm.phiAtPos(off);
+                    let dphi = frac - (p0 - Math.floor(p0));
+                    dphi -= Math.round(dphi);
+                    off += dphi / pm.hzAtPos(off);
+                }
+                // ...then aligned exactly to the OUTGOING segment's waveform
+                let alignV = 1;
+                if (lastSeg && t0 - lastSeg.t0 < 0.8 && lastSeg.loop.buffer) {
+                    const posOut = posAfter(pitchMap(lastSeg.loop), lastSeg.off, phaseAt(t0) - phaseAt(lastSeg.t0));
+                    const al = alignOffset(lastSeg.loop, posOut, loop, off, f);
+                    off = al.off; alignV = al.v;
+                }
+                off = Math.max(0, Math.min(maxOff, off));
+                const avail = (useEnd - off - margin) / (rateMax * 1.02) - 2 * XFADE;
+                const segFull = Math.max(0.05, Math.min(SEG_MIN + Math.random() * (SEG_MAX - SEG_MIN), avail));
+                const T = segFull + 2 * XFADE, tEnd = t0 + XFADE + segFull;   // the next segment starts at tEnd
+                const src = ctx.createBufferSource(); src.buffer = loop.buffer; src.loop = false;
+                const baseCents = 1200 * Math.log2(REF_HZ / pm.hzMed) + detuneCents;
+                // Detune curve FLATTENS the recording's measured pitch track so
+                // this segment sounds at exactly the (shared) target pitch.
+                const dt = 0.005, K = Math.max(2, Math.ceil(T / dt) + 1);
+                const dCurve = new Float32Array(K), gCurve = new Float32Array(K);
+                // ρ-compensated fade-in: with the outgoing side fading linearly
+                // (1−w) and the splice's measured waveform correlation ρ, this
+                // incoming gain keeps the summed amplitude flat — it is linear w
+                // when the splice is perfectly phase-matched (ρ→1) and morphs to
+                // equal-power when it could not be matched (ρ→0), so a splice
+                // can never dip the sustain.
+                const rho = Math.max(0, Math.min(0.98, alignV));
+                for (let k = 0; k < K; k++) {
+                    const tau = Math.min(T, k * (T / (K - 1))), pos = off + tau * rate0;
+                    dCurve[k] = baseCents - 1200 * Math.log2(pm.hzAtPos(pos) / pm.hzMed);
+                    let w;
+                    if (tau < XFADE) {
+                        const q = 1 - tau / XFADE;   // outgoing's remaining gain
+                        w = -rho * q + Math.sqrt(Math.max(0, 1 - (1 - rho * rho) * q * q));
+                    } else w = tau > XFADE + segFull ? Math.max(0, (T - tau) / XFADE) : 1;
+                    const eq = Math.min(1.6, Math.max(0.65, prof.mean / (rmsAt(loop, pos) + 1e-6)));
+                    gCurve[k] = 0.9 * w * eq;
+                }
+                gCurve[0] = 0; gCurve[K - 1] = 0;
+                src.detune.value = dCurve[0];
+                pitchCents.connect(src.detune);                        // portamento target (shared)
+                lfoDepth.connect(src.detune);                          // musical vibrato (shared)
+                driftGain.connect(src.detune);                         // sub-cent life (shared)
+                const g = ctx.createGain(); g.gain.value = 0;
+                // separate series "kill" gain: resplice fades THIS, never the
+                // value-curve param (cancelAndHold on an active curve snaps —
+                // an audible hard cut — in some engines)
+                const kg = ctx.createGain(); kg.gain.value = 1;
+                src.connect(g); g.connect(kg); kg.connect(out);
+                try {
+                    src.detune.setValueCurveAtTime(dCurve, t0, T);
+                    g.gain.setValueCurveAtTime(gCurve, t0, T);
+                    src.start(t0, off); src.stop(t0 + T + 0.02);
+                } catch (e) { try { src.disconnect(); } catch (e2) {} try { kg.disconnect(); } catch (e2) {} return segFull; }
+                const seg = { src, g, kg, t0, off, loop, tStop: t0 + T + 0.02 };
+                segs.add(seg); lastSeg = seg;
+                src.onended = () => { segs.delete(seg); try { src.disconnect(); } catch (e) {} try { g.disconnect(); } catch (e) {} try { kg.disconnect(); } catch (e) {} };
+                return segFull;
+            }
+
+            // Lookahead scheduler: keep ~0.35 s of segments queued on the audio clock.
             function tick() {
                 if (!alive) return;
-                const ahead = ctx.currentTime + 0.14;
-                if (nextGrainAt < ctx.currentTime) nextGrainAt = ctx.currentTime;
+                const now = ctx.currentTime;
+                if (nextAt < now + 0.005) nextAt = now + 0.005;
                 let guard = 0;
-                while (nextGrainAt < ahead && guard++ < 64) {
-                    spawnGrain(nextGrainAt);
-                    nextGrainAt += (GDUR_MIN + Math.random() * (GDUR_MAX - GDUR_MIN)) / OVERLAP;   // hop = grain / overlap
-                }
+                while (nextAt < now + 0.35 && guard++ < 16) nextAt += XFADE + startSegment(nextAt);
             }
-            const grainTimer = (typeof setInterval === 'function') ? setInterval(tick, 60) : null;
+            const segTimer = (typeof setInterval === 'function') ? setInterval(tick, 80) : null;
             tick();
+
+            // Retire every live/pending segment with a crossfade ending at t+fade
+            // and start fresh ones — used when the vowel changes mid-note.
+            function resplice(t, fade) {
+                const now = ctx.currentTime, tv = Math.max(now + 0.03, t || 0);
+                segs.forEach((s) => {
+                    try {
+                        const kk = s.kg.gain;
+                        if (s.t0 >= tv) { kk.setValueAtTime(0, now); s.src.stop(tv); }
+                        else {
+                            // fade the kill gain — the value-curve param stays untouched;
+                            // never let the fade outlive the source's scheduled stop
+                            const fEnd = Math.max(now + 0.01, Math.min(tv + fade, (s.tStop || (tv + fade)) - 0.005));
+                            kk.setValueAtTime(1, now); kk.linearRampToValueAtTime(0, fEnd);
+                        }
+                    } catch (e) {}
+                });
+                nextAt = tv; tick();
+            }
 
             // Play one procedural consonant into the ungated consonant bus.
             // Fricatives/stops = band-passed noise; nasals/liquids = a brief
@@ -856,7 +1107,7 @@ main { padding-left: 1rem; padding-right: 1rem; }
                 const p = CONSONANTS[phone]; if (!p) return;
                 const t0 = Math.max(ctx.currentTime, startAt);
                 if (p.cls === 'nasal' || p.cls === 'liquid') {
-                    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = pitchHz || curHz || 200;
+                    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = pitchHz || hzTo || 200;
                     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = p.lp; lp.Q.value = 0.7;
                     const g = ctx.createGain(); g.gain.value = 0;
                     o.connect(lp); lp.connect(g); g.connect(consBus);
@@ -878,7 +1129,7 @@ main { padding-left: 1rem; padding-right: 1rem; }
                     src.connect(bp); bp.connect(g); g.connect(consBus);
                     let bed = null;
                     if (p.voiced) {  // voiced z/v/d/g/b: a soft pitched bed under the noise
-                        const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = pitchHz || curHz || 200;
+                        const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = pitchHz || hzTo || 200;
                         const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
                         const bg = ctx.createGain(); bg.gain.value = 0; o.connect(lp); lp.connect(bg); bg.connect(consBus);
                         o.start(at); bg.gain.setValueAtTime(0, at); bg.gain.linearRampToValueAtTime(p.lvl * 0.6, at + 0.006); bg.gain.setTargetAtTime(0, at + p.dur * 0.5, 0.02); o.stop(at + p.dur + 0.1); bed = o;
@@ -908,9 +1159,20 @@ main { padding-left: 1rem; padding-right: 1rem; }
                 technique, output: voiceOut, articulate,
                 setFrequency(f, t, glide) {
                     const now = ctx.currentTime, t0 = (t && t > now) ? t : now;
+                    if (t0 > phT) { phC = phaseAt(t0); phT = t0; }   // integrate the OLD ramp up to t0
                     hzFrom = hzAt(t0); hzTo = f; rampT0 = t0; rampDur = (glide && glide > 0) ? glide : 0;
-                    // re-pick the nearest-pitch sample so the grains stay formant-accurate
+                    // glide the shared pitch node: linear-in-cents == the exponential hzAt models
+                    const p = pitchCents.offset, c0 = 1200 * Math.log2(Math.max(1, hzFrom) / REF_HZ), c1 = 1200 * Math.log2(Math.max(1, f) / REF_HZ);
+                    try {
+                        p.cancelScheduledValues(t0); p.setValueAtTime(c0, t0);
+                        if (rampDur > 0) p.linearRampToValueAtTime(c1, t0 + rampDur);
+                        else p.setValueAtTime(c1, t0);
+                    } catch (e) {}
+                    // re-pick the nearest-pitch sample so segments stay formant-accurate
                     curLoop = pickLoop(curVowel, f) || curLoop;
+                    // a big jump invalidates in-flight segments' rate budgets
+                    // (they could run out of buffer): resplice cleanly instead
+                    if (Math.abs(1200 * Math.log2(Math.max(1, f) / Math.max(1, hzFrom))) > 250) resplice(t0, 0.06);
                 },
                 // fast-ish attack, slow smooth release on the vowel gate
                 setLevel(v, t) {
@@ -919,15 +1181,28 @@ main { padding-left: 1rem; padding-right: 1rem; }
                     if (v >= g.value) g.linearRampToValueAtTime(v, t + 0.03);   // rising: crisp onset
                     else g.setTargetAtTime(v, t, 0.06);                          // falling: ~180ms natural decay
                 },
-                setVowel(name2, t) { if (name2 !== curVowel) { curVowel = name2; curLoop = pickLoop(name2, hzTo) || curLoop; } },
+                setVowel(name2, t) {
+                    if (name2 === curVowel) return;
+                    curVowel = name2; curLoop = pickLoop(name2, hzTo) || curLoop;
+                    resplice(t, 0.09);                 // crossfade old-vowel segments into new-vowel ones
+                },
                 dispose() {
-                    alive = false; try { if (grainTimer) clearInterval(grainTimer); } catch (e) {}
-                    // fade the gate before stopping grains so teardown never clicks
+                    alive = false; try { if (segTimer) clearInterval(segTimer); } catch (e) {}
+                    // fade the gate before stopping segments so teardown never clicks
                     const t = ctx.currentTime, fade = 0.2;
                     try { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(out.gain.value, t); out.gain.linearRampToValueAtTime(0, t + fade); } catch (e) {}
                     try { lfo.stop(t + fade + 0.05); } catch (e) {}
-                    activeGrains.forEach((s) => { try { s.stop(t + fade + 0.12); } catch (e) {} });
-                    setTimeout(() => { try { out.disconnect(); } catch (e) {} try { consBus.disconnect(); } catch (e) {} try { voiceOut.disconnect(); } catch (e) {} }, (fade + 0.25) * 1000);
+                    try { driftSrc.stop(t + fade + 0.05); } catch (e) {}
+                    try { pitchCents.stop(t + fade + 0.05); } catch (e) {}
+                    segs.forEach((s) => { try { s.src.stop(t + fade + 0.12); } catch (e) {} });
+                    setTimeout(() => {
+                        try { out.disconnect(); } catch (e) {}
+                        try { consBus.disconnect(); } catch (e) {}
+                        try { voiceOut.disconnect(); } catch (e) {}
+                        try { lfoDepth.disconnect(); } catch (e) {}
+                        try { driftGain.disconnect(); } catch (e) {}
+                        try { pitchCents.disconnect(); } catch (e) {}
+                    }, (fade + 0.25) * 1000);
                 }
             };
         }
