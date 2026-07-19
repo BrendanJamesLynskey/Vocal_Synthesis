@@ -755,23 +755,107 @@ main { padding-left: 1rem; padding-right: 1rem; }
         // choosing the nearest pitch in the sample grid and detuning it by at
         // most a semitone or so (so the vocal-tract formants stay put — no
         // "chipmunk"). Long notes are sustained by phase-coherent splicing of
-        // the short recording (see below), and one shared vibrato LFO rides
-        // every layer's detune so the note always stays a single pitch.
+        // the short recording (see below). The splice engine renders the note
+        // DEAD IN TUNE; the human "life" (vibrato, micro-jitter, breath, AM)
+        // is then restored on the summed voice — see the LIFE section below —
+        // with amounts benchmarked against real VocalSet sustained singing.
         if (technique === 'sampler' && hasSamples(ctx)) {
             const bank = ctx.__vocalSamples;
             const voicePref = opts.voice || 'auto';           // 'auto' | 'male' | 'female'
-            const vibDepthCents = opts.vibCents != null ? opts.vibCents : (vibDepth * 1200); // reuse vibDepth (ratio) → cents
-            const vibRate = opts.vibRate != null ? opts.vibRate : (4.6 + Math.random() * 1.2);
+            // Vibrato depth in PEAK CENTS, benchmarked on real sustained takes
+            // (VocalSet long tones): straight/early-music singing measures
+            // ~15–45 cents at 3.5–5.5 Hz (operatic vibrato is 60–120 c — far
+            // more than we want here). Engines pass vibDepth as a small ratio
+            // (0.005–0.008); map that into the measured human range so the
+            // default lands ~30 c instead of the old organ-static ~7 c.
+            // opts.vibCents stays as the explicit override.
+            const vibCents = opts.vibCents != null ? opts.vibCents
+                : Math.max(12, Math.min(55, vibDepth * 4600));
+            const vibRate = opts.vibRate != null ? opts.vibRate : (4.5 + Math.random() * 0.9);
 
             const out = ctx.createGain(); out.gain.value = 0;   // voice gate (vowel)
             // voiceOut = exposed output = gated vowel + ungated consonant tap, so
             // articulated consonants sound through/around the vowel gate.
-            const voiceOut = ctx.createGain(); voiceOut.gain.value = 1; out.connect(voiceOut);
+            const voiceOut = ctx.createGain(); voiceOut.gain.value = 1;
             const consBus = ctx.createGain(); consBus.gain.value = 1; consBus.connect(voiceOut);
-            // shared vibrato LFO → depth gain → fans out to every source.detune
+
+            // ── LIFE: vibrato / micro-jitter / AM / swell / breath ──────────
+            // Periodic pitch modulation is applied to the SUMMED voice through
+            // a short delay line whose delay time is modulated (instantaneous
+            // pitch ratio = 1 − dτ/dt). This is exact FM of the whole voice:
+            // perfectly coherent across every live splice segment, zero-mean
+            // (a held note can never wander off pitch), and — crucially — it
+            // leaves the splice engine's phase model untouched, so crossfading
+            // segments keep reinforcing instead of beating. Slow mean drift
+            // (which a bounded delay cannot express) stays on the shared
+            // per-segment detune input, kept small enough to stay in tune.
+            const trem = ctx.createGain(); trem.gain.value = 1;          // vibrato-locked AM + slow swell
+            const vibDelay = ctx.createDelay(0.02); vibDelay.delayTime.value = 0.003;
+            out.connect(trem); trem.connect(vibDelay); vibDelay.connect(voiceOut);
+            const centsToRatio = (c) => Math.log(2) * c / 1200;          // small-angle cents → Δf/f
+            // full vibrato depth expressed as a delay-swing (seconds)
+            const vibFull = centsToRatio(vibCents) / (2 * Math.PI * vibRate);
             const lfo = ctx.createOscillator(); lfo.frequency.value = vibRate;
-            const lfoDepth = ctx.createGain(); lfoDepth.gain.value = vibDepthCents;
-            lfo.connect(lfoDepth); lfo.start(ctx.currentTime + Math.random() * 0.1);
+            const vibGain = ctx.createGain(); vibGain.gain.value = 0;    // grown by vibOnset()
+            lfo.connect(vibGain); vibGain.connect(vibDelay.delayTime);
+            lfo.start(ctx.currentTime + Math.random() * 0.1);
+            // vibrato-locked AM: real vibrato always carries a few % of
+            // amplitude modulation as the harmonics sweep the formant slopes
+            const AM_FRAC = 0.055;
+            const amGain = ctx.createGain(); amGain.gain.value = 0;      // grown by vibOnset()
+            lfo.connect(amGain); amGain.connect(trem.gain);
+            // a human never metronomes: slow random wobble of vibrato rate…
+            const rateWob = ctx.createBufferSource(); rateWob.buffer = getDrift(ctx); rateWob.loop = true;
+            rateWob.playbackRate.value = 2 + Math.random() * 2;
+            const rateWobG = ctx.createGain(); rateWobG.gain.value = 0.25;   // ±0.25 Hz
+            rateWob.connect(rateWobG); rateWobG.connect(lfo.frequency); rateWob.start();
+            // …and of vibrato depth (±~25%)
+            const depthWob = ctx.createBufferSource(); depthWob.buffer = getDrift(ctx); depthWob.loop = true;
+            depthWob.playbackRate.value = 2.5 + Math.random() * 2;
+            const depthWobG = ctx.createGain(); depthWobG.gain.value = 0;    // grown by vibOnset()
+            depthWob.connect(depthWobG); depthWobG.connect(vibGain.gain); depthWob.start();
+            // fast micro-jitter — the 1.5–9 Hz aperiodic pitch irregularity
+            // real sustained notes show at ~3–9 cents RMS (also via the delay,
+            // so it is zero-mean and phase-safe)
+            const jit = ctx.createBufferSource(); jit.buffer = getDrift(ctx); jit.loop = true;
+            jit.playbackRate.value = 9 + Math.random() * 6;
+            const jitG = ctx.createGain(); jitG.gain.value = 3.2e-4;
+            jit.connect(jitG); jitG.connect(vibDelay.delayTime); jit.start();
+            // slow amplitude swell (±~5%) so a held note breathes
+            const swellSrc = ctx.createBufferSource(); swellSrc.buffer = getDrift(ctx); swellSrc.loop = true;
+            swellSrc.playbackRate.value = 1.5 + Math.random();
+            const swellG = ctx.createGain(); swellG.gain.value = 0.05;
+            swellSrc.connect(swellG); swellG.connect(trem.gain); swellSrc.start();
+            // subtle vowel-shaped aspiration under the tone, gated with the
+            // vowel: broadband air high-passed above the strong harmonics and
+            // peaked at the vowel's F3 (the "breathy" formant region)
+            const breathSrc = ctx.createBufferSource(); breathSrc.buffer = getNoise(ctx); breathSrc.loop = true;
+            breathSrc.playbackRate.value = 0.85 + Math.random() * 0.3;
+            const breathHP = ctx.createBiquadFilter(); breathHP.type = 'highpass'; breathHP.frequency.value = 1100; breathHP.Q.value = 0.5;
+            const breathPK = ctx.createBiquadFilter(); breathPK.type = 'peaking'; breathPK.Q.value = 1; breathPK.gain.value = 10;
+            breathPK.frequency.value = (VOWELS[vowelName] && VOWELS[vowelName][2]) ? VOWELS[vowelName][2].f : 2600;
+            // real low male voices carry the least aspiration (their measured
+            // HNR is already at the human lower bound) — scale the air with pitch
+            const breathAt = (hz) => breath * 0.16 * Math.max(0.35, Math.min(1.25, hz / 300));
+            const breathG = ctx.createGain(); breathG.gain.value = breathAt(200);
+            breathSrc.connect(breathHP); breathHP.connect(breathPK); breathPK.connect(breathG); breathG.connect(out);
+            breathSrc.start();
+            // Delayed vibrato onset: a sung note starts near-straight and the
+            // vibrato blooms as the note settles (~0.3 s delay + ~0.4 s grow —
+            // clearly visible in the real long-tone takes). setTargetAtTime
+            // only (never a value jump), so the delay line never clicks.
+            const vibDelayOn = 0.22 + Math.random() * 0.16, vibGrowTc = 0.3 + Math.random() * 0.15;
+            function vibOnset(t, frac) {
+                const t0 = Math.max(ctx.currentTime, t || 0);
+                try {
+                    const g = vibGain.gain, a = amGain.gain, w = depthWobG.gain;
+                    g.cancelScheduledValues(t0); a.cancelScheduledValues(t0); w.cancelScheduledValues(t0);
+                    g.setTargetAtTime(vibFull * frac, t0, 0.03); a.setTargetAtTime(AM_FRAC * frac, t0, 0.03); w.setTargetAtTime(vibFull * 0.25 * frac, t0, 0.03);
+                    g.setTargetAtTime(vibFull, t0 + vibDelayOn, vibGrowTc);
+                    a.setTargetAtTime(AM_FRAC, t0 + vibDelayOn, vibGrowTc);
+                    w.setTargetAtTime(vibFull * 0.25, t0 + vibDelayOn, vibGrowTc);
+                } catch (e) {}
+            }
 
             const hzToMidi = (hz) => 69 + 12 * Math.log2(hz / 440);
             function pickPart(midi) {
@@ -834,11 +918,14 @@ main { padding-left: 1rem; padding-right: 1rem; }
             const pitchCents = ctx.createConstantSource();
             pitchCents.offset.value = 1200 * Math.log2(hzTo / REF_HZ);
             pitchCents.start();
-            // Slow SUB-CENT random drift — also shared, so it adds life without
-            // ever splitting the note into different simultaneous pitches.
+            // Slow random pitch drift — shared by every segment, so it adds
+            // life without ever splitting the note into different simultaneous
+            // pitches. Real sustained notes wander 4–15 cents RMS around the
+            // mean; ±3.5 c peak keeps us audibly alive yet safely in tune
+            // (and keeps splice read-position error ≪ a pitch period).
             const driftSrc = ctx.createBufferSource(); driftSrc.buffer = getDrift(ctx); driftSrc.loop = true;
             driftSrc.playbackRate.value = 0.85 + Math.random() * 0.3;
-            const driftGain = ctx.createGain(); driftGain.gain.value = 0.6;   // ±0.6 cents
+            const driftGain = ctx.createGain(); driftGain.gain.value = 5;     // ±5 cents
             driftSrc.connect(driftGain); driftSrc.start();
 
             // Measure each loop ONCE (lazily, cached on the loop object): a 10 ms
@@ -950,6 +1037,7 @@ main { padding-left: 1rem; padding-right: 1rem; }
             const XFADE = 0.09, SEG_MIN = 0.16, SEG_MAX = 0.34;   // splice crossfade / segment-length bounds (s)
             const segs = new Set();
             let nextAt = 0, alive = true, lastSeg = null;         // lastSeg: the most recently started segment
+            let spliceBarrier = 0;   // segments starting before this must END by it (a scheduled resplice)
 
             // Where (in buffer seconds) is a flattened segment's read head after
             // `cyc` output cycles? Inverts the cumulative-phase map by Newton.
@@ -1022,7 +1110,10 @@ main { padding-left: 1rem; padding-right: 1rem; }
                 }
                 off = Math.max(0, Math.min(maxOff, off));
                 const avail = (useEnd - off - margin) / (rateMax * 1.02) - 2 * XFADE;
-                const segFull = Math.max(0.05, Math.min(SEG_MIN + Math.random() * (SEG_MAX - SEG_MIN), avail));
+                let segFull = Math.max(0.05, Math.min(SEG_MIN + Math.random() * (SEG_MAX - SEG_MIN), avail));
+                // never straddle a scheduled resplice point (its pitch/loop may
+                // change beyond this segment's rate budget)
+                if (t0 < spliceBarrier) segFull = Math.max(0.05, Math.min(segFull, spliceBarrier - XFADE - t0));
                 const T = segFull + 2 * XFADE, tEnd = t0 + XFADE + segFull;   // the next segment starts at tEnd
                 const src = ctx.createBufferSource(); src.buffer = loop.buffer; src.loop = false;
                 const baseCents = 1200 * Math.log2(REF_HZ / pm.hzMed) + detuneCents;
@@ -1051,8 +1142,8 @@ main { padding-left: 1rem; padding-right: 1rem; }
                 gCurve[0] = 0; gCurve[K - 1] = 0;
                 src.detune.value = dCurve[0];
                 pitchCents.connect(src.detune);                        // portamento target (shared)
-                lfoDepth.connect(src.detune);                          // musical vibrato (shared)
-                driftGain.connect(src.detune);                         // sub-cent life (shared)
+                driftGain.connect(src.detune);                         // slow pitch drift (shared)
+                // (vibrato + jitter ride the post-sum delay line, not detune)
                 const g = ctx.createGain(); g.gain.value = 0;
                 // separate series "kill" gain: resplice fades THIS, never the
                 // value-curve param (cancelAndHold on an active curve snaps —
@@ -1082,7 +1173,11 @@ main { padding-left: 1rem; padding-right: 1rem; }
             tick();
 
             // Retire every live/pending segment with a crossfade ending at t+fade
-            // and start fresh ones — used when the vowel changes mid-note.
+            // and start fresh ones — used when the vowel changes mid-note and
+            // when a scheduled pitch jump exceeds in-flight rate budgets. tv
+            // may be well in the FUTURE (engines schedule ~2 s ahead): keep
+            // playing normally until tv — fades start AT tv, not at call time,
+            // and the scheduler keeps filling the gap up to tv.
             function resplice(t, fade) {
                 const now = ctx.currentTime, tv = Math.max(now + 0.03, t || 0);
                 segs.forEach((s) => {
@@ -1092,12 +1187,14 @@ main { padding-left: 1rem; padding-right: 1rem; }
                         else {
                             // fade the kill gain — the value-curve param stays untouched;
                             // never let the fade outlive the source's scheduled stop
-                            const fEnd = Math.max(now + 0.01, Math.min(tv + fade, (s.tStop || (tv + fade)) - 0.005));
-                            kk.setValueAtTime(1, now); kk.linearRampToValueAtTime(0, fEnd);
+                            const tKill = Math.max(now, tv - 0.01);
+                            const fEnd = Math.max(tKill + 0.01, Math.min(tv + fade, (s.tStop || (tv + fade)) - 0.005));
+                            kk.setValueAtTime(1, tKill); kk.linearRampToValueAtTime(0, fEnd);
                         }
                     } catch (e) {}
                 });
-                nextAt = tv; tick();
+                spliceBarrier = tv;
+                nextAt = Math.min(nextAt, tv); tick();
             }
 
             // Play one procedural consonant into the ungated consonant bus.
@@ -1170,20 +1267,33 @@ main { padding-left: 1rem; padding-right: 1rem; }
                     } catch (e) {}
                     // re-pick the nearest-pitch sample so segments stay formant-accurate
                     curLoop = pickLoop(curVowel, f) || curLoop;
+                    try { breathG.gain.setTargetAtTime(breathAt(f), t0, 0.08); } catch (e) {}
+                    const jumpCents = Math.abs(1200 * Math.log2(Math.max(1, f) / Math.max(1, hzFrom)));
+                    // a real singer narrows the vibrato through a note change
+                    // and lets it bloom again as the new note settles
+                    if (jumpCents > 30) vibOnset(t0, 0.4);
                     // a big jump invalidates in-flight segments' rate budgets
                     // (they could run out of buffer): resplice cleanly instead
-                    if (Math.abs(1200 * Math.log2(Math.max(1, f) / Math.max(1, hzFrom))) > 250) resplice(t0, 0.06);
+                    if (jumpCents > 250) resplice(t0, 0.06);
                 },
                 // fast-ish attack, slow smooth release on the vowel gate
                 setLevel(v, t) {
                     const g = out.gain;
                     g.cancelScheduledValues(t); g.setValueAtTime(g.value, t);
-                    if (v >= g.value) g.linearRampToValueAtTime(v, t + 0.03);   // rising: crisp onset
+                    if (v >= g.value) {
+                        g.linearRampToValueAtTime(v, t + 0.03);   // rising: crisp onset
+                        if (g.value < 0.05 && v > 0.05) vibOnset(t, 0.1);   // fresh note: vibrato starts near-straight
+                    }
                     else g.setTargetAtTime(v, t, 0.06);                          // falling: ~180ms natural decay
                 },
                 setVowel(name2, t) {
                     if (name2 === curVowel) return;
                     curVowel = name2; curLoop = pickLoop(name2, hzTo) || curLoop;
+                    // follow the vowel's F3 with the aspiration colour
+                    try {
+                        const f3 = (VOWELS[name2] && VOWELS[name2][2]) ? VOWELS[name2][2].f : 2600;
+                        breathPK.frequency.setTargetAtTime(f3, Math.max(ctx.currentTime, t || 0), 0.06);
+                    } catch (e) {}
                     resplice(t, 0.09);                 // crossfade old-vowel segments into new-vowel ones
                 },
                 dispose() {
@@ -1194,14 +1304,15 @@ main { padding-left: 1rem; padding-right: 1rem; }
                     try { lfo.stop(t + fade + 0.05); } catch (e) {}
                     try { driftSrc.stop(t + fade + 0.05); } catch (e) {}
                     try { pitchCents.stop(t + fade + 0.05); } catch (e) {}
+                    [rateWob, depthWob, jit, swellSrc, breathSrc].forEach((s) => { try { s.stop(t + fade + 0.05); } catch (e) {} });
                     segs.forEach((s) => { try { s.src.stop(t + fade + 0.12); } catch (e) {} });
                     setTimeout(() => {
                         try { out.disconnect(); } catch (e) {}
                         try { consBus.disconnect(); } catch (e) {}
                         try { voiceOut.disconnect(); } catch (e) {}
-                        try { lfoDepth.disconnect(); } catch (e) {}
                         try { driftGain.disconnect(); } catch (e) {}
                         try { pitchCents.disconnect(); } catch (e) {}
+                        [trem, vibDelay, vibGain, amGain, rateWobG, depthWobG, jitG, swellG, breathHP, breathPK, breathG].forEach((n) => { try { n.disconnect(); } catch (e) {} });
                     }, (fade + 0.25) * 1000);
                 }
             };
