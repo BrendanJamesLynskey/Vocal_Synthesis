@@ -725,6 +725,47 @@ main { padding-left: 1rem; padding-right: 1rem; }
         const breath = opts.breath != null ? opts.breath : 0.06;
         const vibDepth = opts.vibDepth != null ? opts.vibDepth : 0.006;
 
+        // ── Pure sine-tone voice ────────────────────────────────────────────
+        // An ethereal, wordless chant colour (as in Synth Orthodox): a sine
+        // fundamental + a faint octave shimmer + a gentle vibrato. No formants,
+        // no vowel, no consonants — just clean tone. The app's schola of detuned
+        // voices supplies the choir width. Same API as every other technique.
+        if (technique === 'sine') {
+            const out = ctx.createGain(); out.gain.value = 0;                 // note gate
+            const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = 220; osc.detune.value = detuneCents;
+            const oscGain = ctx.createGain(); oscGain.gain.value = 0.9; osc.connect(oscGain); oscGain.connect(out);
+            const oct = ctx.createOscillator(); oct.type = 'sine'; oct.frequency.value = 440; oct.detune.value = detuneCents;
+            const octGain = ctx.createGain(); octGain.gain.value = 0.085; oct.connect(octGain); octGain.connect(out);   // faint octave shimmer
+            const vibCents = opts.vibCents != null ? opts.vibCents : (vibDepth * 1200);
+            const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 4.6 + Math.random() * 1.2;
+            const lfoDepth = ctx.createGain(); lfoDepth.gain.value = Math.max(0, vibCents);
+            lfo.connect(lfoDepth); lfoDepth.connect(osc.detune); lfoDepth.connect(oct.detune);
+            osc.start(); oct.start(); lfo.start(ctx.currentTime + Math.random() * 0.1);
+            return {
+                technique, output: out, articulate() {},
+                setFrequency(f, t, glide) {
+                    if (!isFinite(f) || f <= 0) return;
+                    const t0 = (t && t > ctx.currentTime) ? t : ctx.currentTime;
+                    osc.frequency.cancelScheduledValues(t0); oct.frequency.cancelScheduledValues(t0);
+                    if (glide && glide > 0) {
+                        osc.frequency.setValueAtTime(osc.frequency.value, t0); osc.frequency.exponentialRampToValueAtTime(f, t0 + glide);
+                        oct.frequency.setValueAtTime(oct.frequency.value, t0); oct.frequency.exponentialRampToValueAtTime(f * 2, t0 + glide);
+                    } else { osc.frequency.setValueAtTime(f, t0); oct.frequency.setValueAtTime(f * 2, t0); }
+                },
+                setLevel(v, t) {
+                    const g = out.gain; g.cancelScheduledValues(t); g.setValueAtTime(g.value, t);
+                    if (v >= g.value) g.linearRampToValueAtTime(v, t + 0.03); else g.setTargetAtTime(v, t, 0.08);
+                },
+                setVowel() {},
+                dispose() {
+                    const t = ctx.currentTime, fade = 0.15;
+                    try { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(out.gain.value, t); out.gain.linearRampToValueAtTime(0, t + fade); } catch (e) {}
+                    try { osc.stop(t + fade + 0.05); oct.stop(t + fade + 0.05); lfo.stop(t + fade + 0.05); } catch (e) {}
+                    setTimeout(() => { try { out.disconnect(); } catch (e) {} }, (fade + 0.1) * 1000);
+                }
+            };
+        }
+
         if ((technique === 'fof' || technique === 'tract') && ctx.__vocalWorklets) {
             const name = technique === 'fof' ? 'fof-voice' : 'tract-voice';
             const processorOptions = technique === 'fof'
