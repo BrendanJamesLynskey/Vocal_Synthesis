@@ -182,6 +182,97 @@
 
     function hasWorklets(ctx) { return !!(ctx && ctx.__vocalWorklets); }
 
+    // ── Consonant articulation ─────────────────────────────────────────────
+    // Real singing articulates a consonant at each syllable onset (and often a
+    // coda), then flows the melisma on the vowel. Most consonants are noise or
+    // transient events we can synthesise procedurally — no samples needed — so
+    // "Ky-ri-e" gets its k, "Sanctus" its s. Voiced consonants (m,n,l,r) use a
+    // brief pitched murmur at the note's fundamental. Tuned for ecclesiastical
+    // Latin but general enough for the vernacular song texts too.
+    let _noiseBuf = null;
+    function getNoise(ctx) {
+        if (ctx.__vocalNoise) return ctx.__vocalNoise;
+        const n = Math.floor(ctx.sampleRate * 2), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+        ctx.__vocalNoise = buf; return buf;
+    }
+    // A slow, smooth random-walk control signal in [-1,1] (20 s, looped). Used
+    // to give each looped-sample layer its own aperiodic pitch/amplitude drift,
+    // so a short loop repeated under a long held note never reads as identical
+    // stitched copies — the seam and spectral repeat are smeared into a living,
+    // breathing sustain. One buffer per context; each layer reads it at a random
+    // rate and phase, so layers stay decorrelated.
+    function getDrift(ctx) {
+        if (ctx.__vocalDrift) return ctx.__vocalDrift;
+        const n = Math.floor(ctx.sampleRate * 20), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
+        let vel = 0, val = 0, mx = 1e-6;
+        for (let i = 0; i < n; i++) { vel += (Math.random() * 2 - 1) * 0.0009; vel *= 0.9992; val += vel; d[i] = val; if (Math.abs(val) > mx) mx = Math.abs(val); }
+        for (let i = 0; i < n; i++) d[i] /= mx;                 // normalise to ±1
+        ctx.__vocalDrift = buf; return buf;
+    }
+    // Phone → articulation params. cls: 'fric'|'stop'|'nasal'|'liquid'|'aspirate'.
+    // cf/Q = band-pass centre/width of the noise; dur seconds; lvl relative gain;
+    // voiced = add a pitched bed; closure = silent gap before a stop's burst.
+    const CONSONANTS = {
+        s:  { cls: 'fric', cf: 6800, Q: 1.3, dur: 0.10, lvl: 0.11 },
+        z:  { cls: 'fric', cf: 6200, Q: 1.3, dur: 0.08, lvl: 0.08, voiced: true },
+        sh: { cls: 'fric', cf: 3400, Q: 1.6, dur: 0.11, lvl: 0.12 },   // 'sc'+e/i, 'x' softening
+        f:  { cls: 'fric', cf: 5200, Q: 0.6, dur: 0.09, lvl: 0.07 },
+        v:  { cls: 'fric', cf: 4200, Q: 0.7, dur: 0.06, lvl: 0.06, voiced: true },
+        th: { cls: 'fric', cf: 6400, Q: 0.5, dur: 0.08, lvl: 0.05 },
+        h:  { cls: 'aspirate', cf: 2400, Q: 0.4, dur: 0.07, lvl: 0.05 },
+        t:  { cls: 'stop', cf: 3600, Q: 1.0, dur: 0.014, lvl: 0.17, closure: 0.03 },
+        d:  { cls: 'stop', cf: 3000, Q: 1.0, dur: 0.012, lvl: 0.12, closure: 0.02, voiced: true },
+        p:  { cls: 'stop', cf: 1200, Q: 0.8, dur: 0.010, lvl: 0.13, closure: 0.03 },
+        b:  { cls: 'stop', cf: 900,  Q: 0.8, dur: 0.010, lvl: 0.10, closure: 0.02, voiced: true },
+        k:  { cls: 'stop', cf: 1800, Q: 1.4, dur: 0.015, lvl: 0.16, closure: 0.035 }, // guttural/back
+        g:  { cls: 'stop', cf: 1500, Q: 1.4, dur: 0.013, lvl: 0.12, closure: 0.02, voiced: true },
+        m:  { cls: 'nasal', lp: 360, dur: 0.07, lvl: 0.13 },
+        n:  { cls: 'nasal', lp: 480, dur: 0.06, lvl: 0.13 },
+        ng: { cls: 'nasal', lp: 300, dur: 0.07, lvl: 0.12 },
+        l:  { cls: 'liquid', lp: 760, dur: 0.045, lvl: 0.12 },
+        r:  { cls: 'liquid', lp: 620, dur: 0.055, lvl: 0.12, tap: true },  // rolled/tapped r
+        w:  { cls: 'liquid', lp: 520, dur: 0.04, lvl: 0.09 },
+        y:  { cls: 'liquid', lp: 1100, dur: 0.04, lvl: 0.09 }
+    };
+    // Ecclesiastical-Latin grapheme → phone, context-sensitive (c/g/sc soften
+    // before e,i,ae,oe; digraphs ch/ph/th/gn/qu/x). Returns array of phone ids.
+    function graphemesToPhones(cluster, nextVowel) {
+        const soft = /^[eiœæy]/.test(nextVowel || '');
+        const s = cluster.toLowerCase(), out = [];
+        for (let i = 0; i < s.length;) {
+            const two = s.substr(i, 2);
+            if (two === 'ch') { out.push('k'); i += 2; }            // Christe = Kriste
+            else if (two === 'ph') { out.push('f'); i += 2; }
+            else if (two === 'th') { out.push('t'); i += 2; }       // Latin th = t
+            else if (two === 'gn') { out.push('ng'); out.push('y'); i += 2; } // agnus ≈ any-us
+            else if (two === 'qu') { out.push('k'); out.push('w'); i += 2; }
+            else if (two === 'sc') { out.push(soft ? 'sh' : 'k'); if (!soft) out.push('k'); i += 2; }
+            else {
+                const c = s[i];
+                if (c === 'c') out.push(soft ? 'sh' : 'k');         // Cecilia softens
+                else if (c === 'g') out.push(soft ? 'y' : 'g');     // (soft g ≈ palatal glide, approx)
+                else if (c === 'x') { out.push('k'); out.push('s'); }
+                else if (c === 'j') out.push('y');                  // Latin j = y
+                else if (c === 'w') out.push('w');
+                else if ('bdfhklmnprstvz'.includes(c)) out.push(c);
+                // silent/ignored: 'h' inside words is weak but we keep leading h; skip anything else
+                i += 1;
+            }
+        }
+        return out.filter((p) => CONSONANTS[p]);
+    }
+    // Split a syllable's text into {onset:[phones], coda:[phones]} around its vowel core.
+    const _isVowel = (c) => 'aeiouyœæ'.includes(c);
+    function splitSyllable(text) {
+        const s = (text || '').toLowerCase().replace(/[^a-zœæ]/g, '');
+        if (!s) return { onset: [], coda: [] };
+        let a = 0; while (a < s.length && !_isVowel(s[a])) a++;
+        let b = s.length; while (b > a && !_isVowel(s[b - 1])) b--;
+        const onsetC = s.slice(0, a), firstVowel = s[a] || '', codaC = s.slice(b);
+        return { onset: graphemesToPhones(onsetC, firstVowel), coda: graphemesToPhones(codaC, '') };
+    }
+
     // Build a PeriodicWave whose harmonic amplitudes trace the formant envelope
     // at a given fundamental (used by the 'additive' technique).
     function formantWave(ctx, f0, formants) {
@@ -285,7 +376,11 @@
             const vibDepthCents = opts.vibCents != null ? opts.vibCents : (vibDepth * 1200); // reuse vibDepth (ratio) → cents
             const vibRate = opts.vibRate != null ? opts.vibRate : (4.6 + Math.random() * 1.2);
 
-            const out = ctx.createGain(); out.gain.value = 0;   // voice gate
+            const out = ctx.createGain(); out.gain.value = 0;   // voice gate (vowel)
+            // voiceOut = exposed output = gated vowel + ungated consonant tap, so
+            // articulated consonants sound through/around the vowel gate.
+            const voiceOut = ctx.createGain(); voiceOut.gain.value = 1; out.connect(voiceOut);
+            const consBus = ctx.createGain(); consBus.gain.value = 1; consBus.connect(voiceOut);
             // shared vibrato LFO → depth gain → fans out to every source.detune
             const lfo = ctx.createOscillator(); lfo.frequency.value = vibRate;
             const lfoDepth = ctx.createGain(); lfoDepth.gain.value = vibDepthCents;
@@ -313,7 +408,19 @@
                 if (!loop) return null;
                 const setGain = ctx.createGain(); setGain.gain.value = 0; setGain.connect(out);
                 const baseCents = 1200 * Math.log2(hz / loop.hz) + detuneCents;
-                const srcs = [];
+                const srcs = [], mods = [];
+                // Give a modulation param its own slow, aperiodic drift (from the
+                // shared random-walk buffer, read at a random rate/phase) so this
+                // layer's loop never repeats identically. Returns the source so it
+                // can be stopped on respawn/dispose (else it leaks & keeps drifting).
+                function addDrift(param, depth) {
+                    const nz = ctx.createBufferSource(); nz.buffer = getDrift(ctx); nz.loop = true;
+                    nz.playbackRate.value = 0.6 + Math.random() * 0.8;     // each layer drifts at its own slow rate
+                    const dg = ctx.createGain(); dg.gain.value = depth;
+                    nz.connect(dg); dg.connect(param);
+                    nz.start(atTime, Math.random() * 18);                  // random phase into the 20 s walk
+                    mods.push(nz);
+                }
                 for (let i = 0; i < size; i++) {
                     const spread = size > 1 ? (i / (size - 1) - 0.5) : 0;   // -0.5..0.5
                     const s = ctx.createBufferSource(); s.buffer = loop.buffer; s.loop = true;
@@ -324,6 +431,11 @@
                     if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = spread * 0.7; s.connect(g); g.connect(p); p.connect(setGain); }
                     else { s.connect(g); g.connect(setGain); }
                     s.start(atTime, Math.random() * (loop.buffer.duration * 0.5));         // decorrelated loop phase
+                    // anti-repetition: a few cents of aperiodic pitch drift + a few
+                    // percent of amplitude shimmer, independent per layer, so a short
+                    // loop under a long note stops sounding like stitched copies.
+                    addDrift(s.detune, 7.5);
+                    addDrift(g.gain, 0.06 / Math.sqrt(size));
                     srcs.push(s);
                 }
                 // equal-power-ish crossfade in; fade previous out
@@ -334,9 +446,9 @@
                     prevSet.node.gain.cancelScheduledValues(atTime);
                     prevSet.node.gain.setValueAtTime(prevSet.node.gain.value, atTime);
                     prevSet.node.gain.linearRampToValueAtTime(0, atTime + fade);
-                    const dead = prevSet; setTimeout(() => { dead.srcs.forEach((s) => { try { s.stop(); } catch (e) {} }); try { dead.node.disconnect(); } catch (e) {} }, (fade + 0.05) * 1000 + 30);
+                    const dead = prevSet; setTimeout(() => { dead.srcs.forEach((s) => { try { s.stop(); } catch (e) {} }); (dead.mods || []).forEach((s) => { try { s.stop(); } catch (e) {} }); try { dead.node.disconnect(); } catch (e) {} }, (fade + 0.05) * 1000 + 30);
                 }
-                return { node: setGain, srcs, key: loop.part + '_' + loop.midi + '_' + vowelName2 };
+                return { node: setGain, srcs, mods, key: loop.part + '_' + loop.midi + '_' + vowelName2 };
             }
 
             function retarget(vowelName2, hz, t, glide) {
@@ -359,8 +471,63 @@
                 curVowel = vowelName2; curHz = hz;
             }
 
+            // Play one procedural consonant into the ungated consonant bus.
+            // Fricatives/stops = band-passed noise; nasals/liquids = a brief
+            // low-passed pitched murmur at the note's fundamental.
+            function playConsonant(phone, startAt, pitchHz) {
+                const p = CONSONANTS[phone]; if (!p) return;
+                const t0 = Math.max(ctx.currentTime, startAt);
+                if (p.cls === 'nasal' || p.cls === 'liquid') {
+                    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = pitchHz || curHz || 200;
+                    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = p.lp; lp.Q.value = 0.7;
+                    const g = ctx.createGain(); g.gain.value = 0;
+                    o.connect(lp); lp.connect(g); g.connect(consBus);
+                    o.start(t0);
+                    if (p.tap) {   // rolled r: a couple of quick amplitude taps
+                        const n = 3, seg = p.dur / n;
+                        for (let k = 0; k < n; k++) { g.gain.setValueAtTime(0, t0 + k * seg); g.gain.linearRampToValueAtTime(p.lvl, t0 + k * seg + seg * 0.35); g.gain.linearRampToValueAtTime(0.0, t0 + (k + 1) * seg); }
+                    } else {
+                        g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(p.lvl, t0 + p.dur * 0.3); g.gain.setTargetAtTime(0, t0 + p.dur * 0.6, 0.03);
+                    }
+                    o.stop(t0 + p.dur + 0.12);
+                } else {           // fric / stop / aspirate: filtered noise burst
+                    const closure = p.closure || 0, at = t0 + closure;
+                    const src = ctx.createBufferSource(); src.buffer = getNoise(ctx); src.loop = true;
+                    src.playbackRate.value = 0.8 + Math.random() * 0.4;
+                    const bp = ctx.createBiquadFilter();
+                    bp.type = p.cls === 'aspirate' ? 'lowpass' : 'bandpass'; bp.frequency.value = p.cf; bp.Q.value = p.Q;
+                    const g = ctx.createGain(); g.gain.value = 0;
+                    src.connect(bp); bp.connect(g); g.connect(consBus);
+                    let bed = null;
+                    if (p.voiced) {  // voiced z/v/d/g/b: a soft pitched bed under the noise
+                        const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = pitchHz || curHz || 200;
+                        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
+                        const bg = ctx.createGain(); bg.gain.value = 0; o.connect(lp); lp.connect(bg); bg.connect(consBus);
+                        o.start(at); bg.gain.setValueAtTime(0, at); bg.gain.linearRampToValueAtTime(p.lvl * 0.6, at + 0.006); bg.gain.setTargetAtTime(0, at + p.dur * 0.5, 0.02); o.stop(at + p.dur + 0.1); bed = o;
+                    }
+                    src.start(at);
+                    const atk = p.cls === 'stop' ? 0.002 : p.dur * 0.25;
+                    g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(p.lvl, at + atk); g.gain.setTargetAtTime(0, at + p.dur * (p.cls === 'stop' ? 0.4 : 0.6), p.cls === 'stop' ? 0.012 : 0.03);
+                    src.stop(at + p.dur + 0.12);
+                }
+            }
+            // Articulate a syllable's consonants around its vowel. Onset phones end
+            // just before vowelOnset (so "sss-AH"); coda phones fire at noteEnd.
+            function articulate(text, vowelOnset, noteEnd, pitchHz) {
+                const { onset, coda } = splitSyllable(text);
+                if (onset.length) {
+                    let dur = 0; for (const p of onset) dur += (CONSONANTS[p].dur + (CONSONANTS[p].closure || 0));
+                    let t = vowelOnset - dur;
+                    for (const p of onset) { playConsonant(p, t, pitchHz); t += CONSONANTS[p].dur + (CONSONANTS[p].closure || 0); }
+                }
+                if (coda.length && noteEnd != null) {
+                    let t = noteEnd;
+                    for (const p of coda) { playConsonant(p, t, pitchHz); t += CONSONANTS[p].dur + (CONSONANTS[p].closure || 0); }
+                }
+            }
+
             return {
-                technique, output: out,
+                technique, output: voiceOut, articulate,
                 setFrequency(f, t, glide) { retarget(curVowel, f, t, glide); },
                 // fast-ish attack, slow smooth release: samples cut dead on a 20ms gate close
                 setLevel(v, t) {
@@ -375,8 +542,8 @@
                     const t = ctx.currentTime, fade = 0.2;
                     try { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(out.gain.value, t); out.gain.linearRampToValueAtTime(0, t + fade); } catch (e) {}
                     try { lfo.stop(t + fade + 0.05); } catch (e) {}
-                    if (current) current.srcs.forEach((s) => { try { s.stop(t + fade + 0.05); } catch (e) {} });
-                    setTimeout(() => { try { out.disconnect(); } catch (e) {} }, (fade + 0.1) * 1000);
+                    if (current) { current.srcs.forEach((s) => { try { s.stop(t + fade + 0.05); } catch (e) {} }); (current.mods || []).forEach((s) => { try { s.stop(t + fade + 0.05); } catch (e) {} }); }
+                    setTimeout(() => { try { out.disconnect(); } catch (e) {} try { consBus.disconnect(); } catch (e) {} try { voiceOut.disconnect(); } catch (e) {} }, (fade + 0.1) * 1000);
                 }
             };
         }
